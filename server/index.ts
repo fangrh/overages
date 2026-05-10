@@ -4,8 +4,8 @@ import fastifyStatic from '@fastify/static';
 import path from 'path';
 import { registerFileRoutes } from './fileRoutes.js';
 import { registerRunRoutes } from './runRoutes.js';
-import { parseRoutes } from './parseRoutes.js';
-import { annotationRoutes } from './annotationRoutes.js';
+import { registerParseRoutes } from './parseRoutes.js';
+import { registerAnnotationRoutes } from './annotationRoutes.js';
 
 const PORT = 3000;
 
@@ -23,8 +23,8 @@ await app.register(fastifyStatic, {
 
 await registerFileRoutes(app);
 await registerRunRoutes(app);
-await app.register(parseRoutes, { prefix: '/api/parse' });
-await app.register(annotationRoutes, { prefix: '/api/annotations' });
+await registerParseRoutes(app);
+await registerAnnotationRoutes(app);
 
 app.get('/api/health', async () => ({ status: 'ok' }));
 
