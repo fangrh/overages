@@ -107,3 +107,7 @@ body {
 #terminal-body .stdout { color: #cdd6f4; }
 #terminal-body .stderr { color: #f38ba8; }
 #terminal-body .system { color: #6c7086; font-style: italic; }
+#terminal-body .timestamp { font-size: 11px; }
+
+.source-highlight { background: rgba(137, 180, 250, 0.15) !important; }
+.source-glyph { background: #89b4fa; width: 4px !important; margin-left: 3px; }
