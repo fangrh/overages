@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>superGDS Studio</title>
+<link rel="stylesheet" href="/studio.css">
+</head>
+<body>
+<div id="toolbar">
+  <button id="open-folder-btn">Open Folder</button>
+  <input type="file" id="folder-input" webkitdirectory style="display:none">
+  <button id="run-btn" disabled>▶ Run</button>
+  <button id="rebuild-btn" disabled>⟳ Rebuild</button>
+  <select id="file-select" disabled><option>No file open</option></select>
+</div>
+
+<div id="panels">
+  <div id="editor-pane">
+    <div id="monaco-editor"></div>
+  </div>
+  <div id="viewer-pane">
+    <iframe id="gds-viewer" src="/viewer/viewer.html"></iframe>
+  </div>
+</div>
+
+<div id="terminal">
+  <div id="terminal-header">
+    <span>Terminal</span>
+    <button id="clear-terminal">clear</button>
+  </div>
+  <div id="terminal-body"></div>
+</div>
+
+<script type="module" src="/studio.js"></script>
+</body>
+</html>
