@@ -117,3 +117,11 @@ export class IframeBridge {
     console.log('askClaude', components, question);
   }
 }
+
+// Expose globally for IIFE bundling
+declare global {
+  interface Window {
+    IframeBridge: typeof IframeBridge;
+  }
+}
+window.IframeBridge = IframeBridge;

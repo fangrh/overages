@@ -33,5 +33,6 @@
     });
     return editor;
   }
+  window.setupMonaco = setupMonaco;
 })();
 //# sourceMappingURL=monacoSetup.js.map

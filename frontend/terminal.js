@@ -32,5 +32,6 @@
       this.container.innerHTML = "";
     }
   };
+  window.TerminalRenderer = TerminalRenderer;
 })();
 //# sourceMappingURL=terminal.js.map

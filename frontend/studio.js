@@ -1,149 +1,5 @@
 "use strict";
 (() => {
-  // frontend/terminal.ts
-  var TerminalRenderer = class {
-    container;
-    autoScroll = true;
-    constructor(container) {
-      this.container = container;
-      container.parentElement?.addEventListener("scroll", () => {
-        const { scrollTop, scrollHeight, clientHeight } = container.parentElement;
-        this.autoScroll = scrollHeight - scrollTop - clientHeight < 50;
-      });
-    }
-    addLine(type, text) {
-      const el = document.createElement("div");
-      el.className = type;
-      const time = (/* @__PURE__ */ new Date()).toLocaleTimeString("en-US", { hour12: false });
-      const ts = document.createElement("span");
-      ts.className = "timestamp";
-      ts.textContent = `[${time}] `;
-      ts.style.color = "#6c7086";
-      el.appendChild(ts);
-      const textNode = document.createElement("span");
-      textNode.textContent = text;
-      el.appendChild(textNode);
-      this.container.appendChild(el);
-      if (this.autoScroll) {
-        this.container.parentElement.scrollTop = this.container.parentElement.scrollHeight;
-      }
-    }
-    clear() {
-      this.container.innerHTML = "";
-    }
-  };
-
-  // frontend/iframeBridge.ts
-  var IframeBridge = class {
-    iframe;
-    ready = false;
-    pending = [];
-    constructor(iframe) {
-      this.iframe = iframe;
-      window.addEventListener("message", this.onMessage.bind(this));
-      let attempts = 0;
-      const checkReady = setInterval(() => {
-        attempts++;
-        if (this.ready || attempts > 50) {
-          clearInterval(checkReady);
-          return;
-        }
-        this.iframe.contentWindow?.postMessage({ type: "ping" }, "*");
-      }, 100);
-    }
-    onMessage(e) {
-      const msg = e.data;
-      if (!msg || typeof msg !== "object") return;
-      switch (msg.type) {
-        case "webviewReady":
-          this.ready = true;
-          for (const data of this.pending) {
-            this.sendLoadGds(data);
-          }
-          this.pending = [];
-          break;
-        case "selectComponents":
-          this.forwardToEditor(msg.components);
-          break;
-        case "askClaude":
-          this.handleAskClaude(msg.components, msg.question);
-          break;
-      }
-    }
-    sendLoadGds(data) {
-      const msg = { type: "loadGds", ...data };
-      if (!this.ready) {
-        this.pending.push(data);
-        return;
-      }
-      this.iframe.contentWindow?.postMessage(msg, "*");
-    }
-    forwardToEditor(components) {
-      const studio = window.studio;
-      if (!studio?.editor) return;
-      const editor2 = studio.editor;
-      const model = editor2.getModel();
-      if (!model) return;
-      const monacoObj = window.monaco;
-      if (!monacoObj) return;
-      const decorations = [];
-      for (const comp of components) {
-        const prov = comp.provenance || {};
-        if (prov.file && prov.line) {
-          const line = typeof prov.line === "number" ? prov.line : parseInt(String(prov.line), 10);
-          if (!isNaN(line)) {
-            decorations.push({
-              range: new monacoObj.Range(line, 1, line, model.getLineMaxLength(line)),
-              options: {
-                isWholeLine: true,
-                className: "source-highlight",
-                glyphMarginClassName: "source-glyph"
-              }
-            });
-          }
-        }
-      }
-      editor2.deltaDecorations([], decorations);
-    }
-    handleAskClaude(components, question) {
-      console.log("askClaude", components, question);
-    }
-  };
-
-  // frontend/monacoSetup.ts
-  var monaco = window.monaco;
-  function setupMonaco(container) {
-    if (!monaco) {
-      console.error("Monaco not loaded - window.monaco is undefined");
-      return null;
-    }
-    monaco.languages.register({ id: "python" });
-    monaco.languages.setLanguageConfiguration("python", {
-      comments: { lineComment: "#", blockComment: ["'''", "'''"] },
-      brackets: [["{", "}"], ["(", ")"], ["[", "]"]],
-      autoClosingPairs: [
-        { open: "{", close: "}" },
-        { open: "(", close: ")" },
-        { open: "[", close: "]" },
-        { open: '"', close: '"' },
-        { open: "'", close: "'" }
-      ]
-    });
-    const editor2 = monaco.editor.create(container, {
-      value: "# Open a Python file to begin\n",
-      language: "python",
-      theme: "vs-dark",
-      fontSize: 14,
-      fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace",
-      minimap: { enabled: false },
-      lineNumbers: "on",
-      scrollBeyondLastLine: false,
-      automaticLayout: true,
-      wordWrap: "on"
-    });
-    return editor2;
-  }
-
   // frontend/studio.ts
   var editor;
   var bridge;
@@ -204,9 +60,9 @@
   var terminalBody = document.getElementById("terminal-body");
   var clearBtn = document.getElementById("clear-terminal");
   function init() {
-    editor = setupMonaco(monacoContainer);
-    terminal = new TerminalRenderer(terminalBody);
-    bridge = new IframeBridge(iframeViewer);
+    editor = window.setupMonaco(monacoContainer);
+    terminal = new window.TerminalRenderer(terminalBody);
+    bridge = new window.IframeBridge(iframeViewer);
     openFolderBtn.addEventListener("click", () => folderInput.click());
     folderInput.addEventListener("change", handleFolderOpen);
     runBtn.addEventListener("click", handleRun);
@@ -231,12 +87,21 @@
   async function handleFolderOpen(e) {
     const input = e.target;
     if (!input.files?.length) return;
-    const path = input.files[0].webkitRelativePath.split("/")[0];
-    sessionStorage.setItem("supergds-workspace", path);
-    await fetch("/api/workspace", {
+    const firstFile = input.files[0];
+    let folderPath;
+    if (firstFile.path) {
+      folderPath = firstFile.path;
+    } else if (firstFile.webkitRelativePath) {
+      folderPath = firstFile.webkitRelativePath.split("/")[0];
+    } else {
+      console.error("Cannot determine folder path - no path or webkitRelativePath");
+      return;
+    }
+    sessionStorage.setItem("supergds-workspace", folderPath);
+    await fetch("/workspace", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspace: path })
+      body: JSON.stringify({ workspace: folderPath })
     });
     runBtn.disabled = false;
     rebuildBtn.disabled = false;
@@ -245,7 +110,16 @@
   }
   async function loadFileList() {
     const res = await fetch("/api/files");
+    if (!res.ok) {
+      console.error("Failed to load files:", res.status, await res.text());
+      fileSelect.innerHTML = "<option>Error loading files</option>";
+      return;
+    }
     const { files } = await res.json();
+    if (!files) {
+      fileSelect.innerHTML = "<option>No files found</option>";
+      return;
+    }
     fileSelect.innerHTML = "";
     const pyFiles = files.filter((f) => f.endsWith(".py"));
     if (pyFiles.length === 0) {

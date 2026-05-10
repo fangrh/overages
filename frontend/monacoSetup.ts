@@ -33,3 +33,11 @@ export function setupMonaco(container: HTMLElement): any {
 
   return editor;
 }
+
+// Expose globally for IIFE bundling
+declare global {
+  interface Window {
+    setupMonaco: typeof setupMonaco;
+  }
+}
+window.setupMonaco = setupMonaco;

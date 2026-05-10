@@ -1,8 +1,6 @@
-import { TerminalRenderer } from './terminal.js';
-import { IframeBridge } from './iframeBridge.js';
-import { setupMonaco } from './monacoSetup.js';
+// Use window-based access for classes exposed by other chunks
+// These are set by their respective modules after loading
 
-// Use any for Monaco since it's loaded via CDN
 type MonacoEditor = any;
 
 interface ComponentSelection {
@@ -21,8 +19,8 @@ interface ComponentSelection {
 type MonacoEditor = any;
 
 let editor: MonacoEditor;
-let bridge: IframeBridge;
-let terminal: TerminalRenderer;
+let bridge: any;
+let terminal: any;
 let currentFile: string | null = null;
 
 class ResizeHandle {
@@ -93,9 +91,12 @@ interface Studio {
 }
 
 export function init() {
-  editor = setupMonaco(monacoContainer);
-  terminal = new TerminalRenderer(terminalBody);
-  bridge = new IframeBridge(iframeViewer);
+  // @ts-ignore - these are set by other chunks loaded via script tags
+  editor = (window as any).setupMonaco(monacoContainer);
+  // @ts-ignore
+  terminal = new (window as any).TerminalRenderer(terminalBody);
+  // @ts-ignore
+  bridge = new (window as any).IframeBridge(iframeViewer);
 
   openFolderBtn.addEventListener('click', () => folderInput.click());
   folderInput.addEventListener('change', handleFolderOpen);
@@ -125,13 +126,31 @@ export function init() {
 async function handleFolderOpen(e: Event) {
   const input = e.target as HTMLInputElement;
   if (!input.files?.length) return;
-  const path = (input.files[0] as any).webkitRelativePath.split('/')[0];
-  sessionStorage.setItem('supergds-workspace', path);
 
-  await fetch('/api/workspace', {
+  // Get the actual folder path - try webkitRelativePath first, but for actual browser
+  // folder selection, we need the full path. Use the path property if available (Chrome),
+  // otherwise fall back to webkitRelativePath.
+  const firstFile = input.files[0] as any;
+  let folderPath: string;
+
+  if (firstFile.path) {
+    // Chrome/Edge - actual full path is available
+    // webkitRelativePath is like "folderName/file.py", get folder from it
+    folderPath = firstFile.path;
+  } else if (firstFile.webkitRelativePath) {
+    // Fallback - webkitRelativePath gives "folderName/file.py", get folder name
+    folderPath = firstFile.webkitRelativePath.split('/')[0];
+  } else {
+    console.error('Cannot determine folder path - no path or webkitRelativePath');
+    return;
+  }
+
+  sessionStorage.setItem('supergds-workspace', folderPath);
+
+  await fetch('/workspace', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ workspace: path }),
+    body: JSON.stringify({ workspace: folderPath }),
   });
 
   runBtn.disabled = false;
@@ -142,7 +161,16 @@ async function handleFolderOpen(e: Event) {
 
 async function loadFileList() {
   const res = await fetch('/api/files');
+  if (!res.ok) {
+    console.error('Failed to load files:', res.status, await res.text());
+    fileSelect.innerHTML = '<option>Error loading files</option>';
+    return;
+  }
   const { files } = await res.json();
+  if (!files) {
+    fileSelect.innerHTML = '<option>No files found</option>';
+    return;
+  }
   fileSelect.innerHTML = '';
   const pyFiles = files.filter((f: string) => f.endsWith('.py'));
   if (pyFiles.length === 0) {

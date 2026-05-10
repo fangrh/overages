@@ -76,5 +76,6 @@
       console.log("askClaude", components, question);
     }
   };
+  window.IframeBridge = IframeBridge;
 })();
 //# sourceMappingURL=iframeBridge.js.map

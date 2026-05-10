@@ -32,3 +32,11 @@ export class TerminalRenderer {
     this.container.innerHTML = '';
   }
 }
+
+// Also expose globally for IIFE bundling
+declare global {
+  interface Window {
+    TerminalRenderer: typeof TerminalRenderer;
+  }
+}
+window.TerminalRenderer = TerminalRenderer;
