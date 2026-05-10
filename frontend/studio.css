@@ -43,28 +43,46 @@ body {
 }
 
 #panels {
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
   overflow: hidden;
 }
 
+.resize-handle {
+  width: 5px;
+  cursor: col-resize;
+  background: #313244;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 10;
+  transition: background 0.15s;
+}
+
+.resize-handle:hover,
+.resize-handle.dragging {
+  background: #89b4fa;
+}
+
 #editor-pane {
   flex: 1;
-  min-width: 0;
+  min-width: 200px;
   display: flex;
   flex-direction: column;
+}
+
+#viewer-pane {
+  flex: 1;
+  min-width: 200px;
+  border-left: none;
+  position: relative;
 }
 
 #monaco-editor {
   flex: 1;
   min-height: 0;
-}
-
-#viewer-pane {
-  flex: 1;
-  min-width: 0;
-  border-left: 1px solid #313244;
 }
 
 #gds-viewer {

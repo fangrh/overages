@@ -1,19 +1,76 @@
-import { setupMonaco } from './monacoSetup.js';
 import { TerminalRenderer } from './terminal.js';
 import { IframeBridge } from './iframeBridge.js';
+import { setupMonaco } from './monacoSetup.js';
 import type * as monaco from 'monaco-editor';
 
 interface ComponentSelection {
   provId: string;
   layer: string;
   bbox: number[];
-  provenance: unknown;
+  provenance: {
+    file?: string;
+    line?: number | string;
+    function?: string;
+    call_chain?: Array<{ file?: string; line?: number | string; function?: string }>;
+    [key: string]: unknown;
+  };
 }
 
 let editor: monaco.editor.IStandaloneCodeEditor;
 let bridge: IframeBridge;
 let terminal: TerminalRenderer;
 let currentFile: string | null = null;
+
+class ResizeHandle {
+  private handle: HTMLElement;
+  private editorPane: HTMLElement;
+  private viewerPane: HTMLElement;
+  private dragging = false;
+  private startX = 0;
+  private startEditorWidth = 0;
+
+  constructor(handleId: string, editorPaneId: string, viewerPaneId: string) {
+    this.handle = document.getElementById(handleId)!;
+    this.editorPane = document.getElementById(editorPaneId)!;
+    this.viewerPane = document.getElementById(viewerPaneId)!;
+    this.setupEvents();
+    this.updateHandlePosition();
+  }
+
+  private setupEvents(): void {
+    this.handle.addEventListener('mousedown', (e) => {
+      this.dragging = true;
+      this.startX = e.clientX;
+      this.startEditorWidth = this.editorPane.getBoundingClientRect().width;
+      this.handle.classList.add('dragging');
+      e.preventDefault();
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!this.dragging) return;
+      const dx = e.clientX - this.startX;
+      const newWidth = this.startEditorWidth + dx;
+      const containerWidth = this.editorPane.parentElement!.getBoundingClientRect().width;
+      const minWidth = 200;
+      const maxWidth = containerWidth - minWidth - 5;
+      const clamped = Math.max(minWidth, Math.min(maxWidth, newWidth));
+      this.editorPane.style.flex = 'none';
+      this.editorPane.style.width = `${clamped}px`;
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (this.dragging) {
+        this.dragging = false;
+        this.handle.classList.remove('dragging');
+      }
+    });
+  }
+
+  updateHandlePosition(): void {
+    const editorRect = this.editorPane.getBoundingClientRect();
+    this.handle.style.left = `${editorRect.width}px`;
+  }
+}
 
 const folderInput = document.getElementById('folder-input') as HTMLInputElement;
 const openFolderBtn = document.getElementById('open-folder-btn') as HTMLButtonElement;
@@ -52,6 +109,13 @@ export function init() {
     rebuildBtn.disabled = false;
     fileSelect.disabled = false;
   }
+
+  new ResizeHandle('resize-handle', 'editor-pane', 'viewer-pane');
+  window.addEventListener('resize', () => {
+    const handle = document.getElementById('resize-handle')!;
+    const editorPane = document.getElementById('editor-pane')!;
+    handle.style.left = `${editorPane.getBoundingClientRect().width}px`;
+  });
 }
 
 async function handleFolderOpen(e: Event) {
