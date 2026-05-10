@@ -3,7 +3,7 @@ import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import path from 'path';
 import { registerFileRoutes } from './fileRoutes.js';
-import { runRoutes } from './runRoutes.js';
+import { registerRunRoutes } from './runRoutes.js';
 import { parseRoutes } from './parseRoutes.js';
 import { annotationRoutes } from './annotationRoutes.js';
 
@@ -22,7 +22,7 @@ await app.register(fastifyStatic, {
 });
 
 await registerFileRoutes(app);
-await app.register(runRoutes, { prefix: '/api/run' });
+await registerRunRoutes(app);
 await app.register(parseRoutes, { prefix: '/api/parse' });
 await app.register(annotationRoutes, { prefix: '/api/annotations' });
 

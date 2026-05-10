@@ -1,5 +1,37 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { runPythonScript } from '../lib/pythonRunner.js';
+import { getWorkspacePath } from './workspace.js';
+import path from 'path';
 
-export async function runRoutes(app: FastifyInstance) {
-  app.get('/', async () => ({}));
+export async function registerRunRoutes(app: FastifyInstance) {
+  app.post('/', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { pythonFile } = req.body as { pythonFile: string };
+    if (!pythonFile) throw new Error('pythonFile required');
+
+    const ws = getWorkspacePath();
+    const fullPath = path.join(ws, pythonFile);
+
+    reply.raw!.setHeader('Content-Type', 'text/event-stream');
+    reply.raw!.setHeader('Cache-Control', 'no-cache');
+    reply.raw!.setHeader('Connection', 'keep-alive');
+
+    const send = (event: string, data: unknown) => {
+      reply.raw!.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+
+    send('start', { status: 'running', pythonFile });
+
+    try {
+      const result = await runPythonScript(
+        { pythonFile: fullPath, cwd: ws },
+        (line) => send('stdout', { line }),
+        (line) => send('stderr', { line })
+      );
+      send('complete', result);
+    } catch (err: any) {
+      send('error', { message: err.message });
+    } finally {
+      reply.raw!.end();
+    }
+  });
 }
