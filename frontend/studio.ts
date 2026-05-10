@@ -1,7 +1,9 @@
 import { TerminalRenderer } from './terminal.js';
 import { IframeBridge } from './iframeBridge.js';
 import { setupMonaco } from './monacoSetup.js';
-import type * as monaco from 'monaco-editor';
+
+// Use any for Monaco since it's loaded via CDN
+type MonacoEditor = any;
 
 interface ComponentSelection {
   provId: string;
@@ -16,7 +18,9 @@ interface ComponentSelection {
   };
 }
 
-let editor: monaco.editor.IStandaloneCodeEditor;
+type MonacoEditor = any;
+
+let editor: MonacoEditor;
 let bridge: IframeBridge;
 let terminal: TerminalRenderer;
 let currentFile: string | null = null;
@@ -83,7 +87,7 @@ const terminalBody = document.getElementById('terminal-body')!;
 const clearBtn = document.getElementById('clear-terminal') as HTMLButtonElement;
 
 interface Studio {
-  editor: monaco.editor.IStandaloneCodeEditor;
+  editor: MonacoEditor;
   bridge: IframeBridge;
   terminal: TerminalRenderer;
 }

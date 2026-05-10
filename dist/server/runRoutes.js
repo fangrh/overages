@@ -1,0 +1,29 @@
+import { runPythonScript } from '../lib/pythonRunner.js';
+import { getWorkspacePath } from './workspace.js';
+import path from 'path';
+export async function registerRunRoutes(app) {
+    app.post('/api/run', async (req, reply) => {
+        const { pythonFile } = req.body;
+        if (!pythonFile)
+            throw new Error('pythonFile required');
+        const ws = getWorkspacePath();
+        const fullPath = path.join(ws, pythonFile);
+        reply.raw.setHeader('Content-Type', 'text/event-stream');
+        reply.raw.setHeader('Cache-Control', 'no-cache');
+        reply.raw.setHeader('Connection', 'keep-alive');
+        const send = (event, data) => {
+            reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        };
+        send('start', { status: 'running', pythonFile });
+        try {
+            const result = await runPythonScript({ pythonFile: fullPath, cwd: ws }, (line) => send('stdout', { line }), (line) => send('stderr', { line }));
+            send('complete', result);
+        }
+        catch (err) {
+            send('error', { message: err.message });
+        }
+        finally {
+            reply.raw.end();
+        }
+    });
+}

@@ -151,7 +151,7 @@ body { display: flex; background: #1a1a2e; font-family: -apple-system, BlinkMacS
 // ============================================================
 // VS Code Webview API
 // ============================================================
-const vscode = acquireVsCodeApi();
+let vscode = null; try { vscode = acquireVsCodeApi(); } catch(e) { /* standalone */ }
 
 // ============================================================
 // State
@@ -380,7 +380,7 @@ function deleteDrawn() {
     drawn.forEach(function(f) {
         var annotationPath = f.get('annotationPath');
         if (annotationPath) {
-            vscode.postMessage({ type: 'deleteAnnotation', jsonPath: annotationPath });
+            vscode && vscode.postMessage({ type: 'deleteAnnotation', jsonPath: annotationPath });
         }
         selectedFeatures.remove(f);
         drawSource.removeFeature(f);
@@ -429,7 +429,7 @@ function onSelectionChanged() {
 
 function postSelectedComponents(features) {
     var mode = document.getElementById('claude-mode').value;
-    vscode.postMessage({
+    vscode && vscode.postMessage({
         type: 'selectComponents',
         components: componentsFromFeatures(features),
         claudeMode: mode
@@ -626,7 +626,7 @@ function updateMultiSourcePanel(fileMap, features) {
             primaryDiv.className = 'kv';
             primaryDiv.innerHTML = '<span class="key">Selected #' + (idx + 1) + '</span><span class="val hl" style="cursor:pointer;">@' + esc(compFile + '#' + compLine + indexLabel) + '</span>';
             primaryDiv.querySelector('.val').addEventListener('click', function() {
-                vscode.postMessage({ type: 'requestSource', file: compFile, line: compLine });
+                vscode && vscode.postMessage({ type: 'requestSource', file: compFile, line: compLine });
             });
             panel.appendChild(primaryDiv);
 
@@ -640,7 +640,7 @@ function updateMultiSourcePanel(fileMap, features) {
                 chainDiv.className = 'kv';
                 chainDiv.innerHTML = '<span class="key" style="color:#585b70;">&nbsp;&nbsp;&larr;</span><span class="val" style="cursor:pointer;color:#6c7086;">@' + esc(cfp + '#' + chainLine) + '</span>';
                 chainDiv.querySelector('.val').addEventListener('click', function() {
-                    vscode.postMessage({ type: 'requestSource', file: cfp, line: cc.line });
+                    vscode && vscode.postMessage({ type: 'requestSource', file: cfp, line: cc.line });
                 });
                 panel.appendChild(chainDiv);
             });
@@ -701,7 +701,7 @@ function renderSourceLinks(filePath, entries, container, primaryFile) {
             + '<span class="fn">' + loopStr + 'Open source</span>';
         btn.onclick = function(e) {
             e.stopPropagation();
-            vscode.postMessage({ type: 'requestSource', file: filePath, line: entry.line });
+            vscode && vscode.postMessage({ type: 'requestSource', file: filePath, line: entry.line });
         };
         container.appendChild(btn);
     });
@@ -913,7 +913,7 @@ Object.keys(drawInteractions).forEach(function(key) {
         try {
             var payload = drawnFeaturePayload(feature);
             if (payload) {
-                vscode.postMessage({ type: 'saveAnnotation', clientId: clientId, shape: payload });
+                vscode && vscode.postMessage({ type: 'saveAnnotation', clientId: clientId, shape: payload });
             }
         } catch (err) {
             console.error('superGDS: annotation serialization failed', err);
@@ -1107,7 +1107,7 @@ function loadGdsData(geojson, gdsPath, pythonFile, annotations, mode) {
     });
 
     if (currentPythonFile) {
-        vscode.postMessage({ type: 'viewerContext', pythonFile: currentPythonFile });
+        vscode && vscode.postMessage({ type: 'viewerContext', pythonFile: currentPythonFile });
     }
 
     clearInspect();
@@ -1631,7 +1631,7 @@ function copyYAML(e) {
     }
 
     var text = lines.join('\n');
-    vscode.postMessage({ type: 'exportYaml', yaml: text });
+    vscode && vscode.postMessage({ type: 'exportYaml', yaml: text });
     var btn = document.getElementById('copy-btn');
     btn.textContent = 'Copied!';
     btn.classList.add('copied');
@@ -1658,7 +1658,7 @@ function sendAskClaude() {
     var gdsFeatures = selectedFeatures.getArray().filter(function(f) { return !f.get('isDrawn'); });
     if (gdsFeatures.length === 0) return;
     var components = componentsFromFeatures(gdsFeatures);
-    vscode.postMessage({ type: 'askClaude', components: components, question: question });
+    vscode && vscode.postMessage({ type: 'askClaude', components: components, question: question });
     hideAskSection();
 }
 
@@ -1669,7 +1669,7 @@ function rebuildScript() {
     var btn = document.getElementById('run-btn');
     btn.classList.add('running');
     document.getElementById('rebuild-overlay').classList.add('visible');
-    vscode.postMessage({ type: 'rebuild' });
+    vscode && vscode.postMessage({ type: 'rebuild' });
 }
 
 function onRebuildComplete() {
@@ -1736,7 +1736,7 @@ new ResizeObserver(function() {
 // ============================================================
 // Signal ready to extension
 // ============================================================
-vscode.postMessage({ type: 'webviewReady' });
+vscode && vscode.postMessage({ type: 'webviewReady' });
 </script>
 </body>
 </html>

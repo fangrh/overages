@@ -1,6 +1,12 @@
-import * as monaco from 'monaco-editor';
+// Access Monaco from window (loaded via CDN require script in index.html)
+const monaco = (window as any).monaco;
 
-export function setupMonaco(container: HTMLElement): monaco.editor.IStandaloneCodeEditor {
+export function setupMonaco(container: HTMLElement): any {
+  if (!monaco) {
+    console.error('Monaco not loaded - window.monaco is undefined');
+    return null;
+  }
+
   monaco.languages.register({ id: 'python' });
 
   monaco.languages.setLanguageConfiguration('python', {

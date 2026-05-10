@@ -1,5 +1,4 @@
 import type { FastifyInstance } from 'fastify';
-import Fastify from 'fastify';
 import path from 'path';
 import fs from 'fs/promises';
 import { setWorkspacePath, getWorkspacePath, isWithinWorkspace } from './workspace.js';
@@ -12,15 +11,15 @@ export async function registerFileRoutes(app: FastifyInstance) {
     return { success: true };
   });
 
-  app.get('/', async () => {
+  app.get('/api/files', async () => {
     const ws = getWorkspacePath();
     const files = await walkDir(ws, ws);
     return { files };
   });
 
-  app.get<{ Params: { path: string } }>('/:path(*)/*', async (req, reply) => {
-    // GET /api/files/script.py → path = "script.py"
-    const filePath = (req.params as any)['path'] + '/' + (req.params as any)['*'];
+  app.get('/files/*', async (req, reply) => {
+    // GET /files/script.py → path = "script.py"
+    const filePath = (req.params as any)['*'];
     if (!isWithinWorkspace(filePath)) throw new Error('Access denied');
     const fullPath = path.join(getWorkspacePath(), filePath);
     try {
@@ -32,8 +31,8 @@ export async function registerFileRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post<{ Params: { path: string } }>('/:path(*)/*', async (req, reply) => {
-    const filePath = (req.params as any)['path'] + '/' + (req.params as any)['*'];
+  app.post('/files/*', async (req, reply) => {
+    const filePath = (req.params as any)['*'];
     if (!isWithinWorkspace(filePath)) throw new Error('Access denied');
     const { content } = req.body as { content: string };
     const fullPath = path.join(getWorkspacePath(), filePath);

@@ -4,7 +4,7 @@ import { getWorkspacePath } from './workspace.js';
 import path from 'path';
 
 export async function registerRunRoutes(app: FastifyInstance) {
-  app.post('/', async (req: FastifyRequest, reply: FastifyReply) => {
+  app.post('/api/run', async (req: FastifyRequest, reply: FastifyReply) => {
     const { pythonFile } = req.body as { pythonFile: string };
     if (!pythonFile) throw new Error('pythonFile required');
 

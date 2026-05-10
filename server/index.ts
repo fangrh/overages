@@ -16,15 +16,15 @@ await app.register(cors, {
   credentials: true,
 });
 
-await app.register(fastifyStatic, {
-  root: path.join(process.cwd(), 'frontend'),
-  prefix: '/',
-});
-
 await registerFileRoutes(app);
 await registerRunRoutes(app);
 await registerParseRoutes(app);
 await registerAnnotationRoutes(app);
+
+await app.register(fastifyStatic, {
+  root: path.join(process.cwd(), 'frontend'),
+  prefix: '/',
+});
 
 app.get('/api/health', async () => ({ status: 'ok' }));
 
