@@ -3,8 +3,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// superGDS root is the parent of the overgds project directory
-const SUPERGDS_ROOT = path.resolve(__dirname, '..');
+// superGDS root is two levels up from lib/ (overgds/lib → overgds → superGDS)
+const SUPERGDS_ROOT = path.resolve(__dirname, '../..');
 
 export async function parseGdsFile(gdsPath: string): Promise<unknown> {
   return new Promise((resolve, reject) => {

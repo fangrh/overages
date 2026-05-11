@@ -1684,6 +1684,11 @@ function onRebuildComplete() {
 window.addEventListener('message', function(event) {
     var message = event.data;
     switch (message.type) {
+        case 'ping':
+            // Respond to iframeBridge polling (used in standalone/VS Code both)
+            if (vscode) vscode.postMessage({ type: 'webviewReady' });
+            else if (window.parent !== window) window.parent.postMessage({ type: 'webviewReady' }, '*');
+            break;
         case 'loadGds':
             onRebuildComplete();
             loadGdsData(

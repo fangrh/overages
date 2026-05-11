@@ -13,6 +13,8 @@ export async function registerRunRoutes(app) {
         reply.raw.setHeader('Connection', 'keep-alive');
         const send = (event, data) => {
             reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+            // Force-flush so the data reaches EventSource before the connection closes
+            reply.raw.flush?.();
         };
         send('start', { status: 'running', pythonFile });
         try {
@@ -23,7 +25,8 @@ export async function registerRunRoutes(app) {
             send('error', { message: err.message });
         }
         finally {
-            reply.raw.end();
+            // Give EventSource time to receive final event before connection closes
+            setTimeout(() => { reply.raw.end(); }, 200);
         }
     });
 }

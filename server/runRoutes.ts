@@ -17,6 +17,8 @@ export async function registerRunRoutes(app: FastifyInstance) {
 
     const send = (event: string, data: unknown) => {
       reply.raw!.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      // Force-flush so the data reaches EventSource before the connection closes
+      (reply.raw as any).flush?.();
     };
 
     send('start', { status: 'running', pythonFile });
@@ -31,7 +33,8 @@ export async function registerRunRoutes(app: FastifyInstance) {
     } catch (err: any) {
       send('error', { message: err.message });
     } finally {
-      reply.raw!.end();
+      // Give EventSource time to receive final event before connection closes
+      setTimeout(() => { reply.raw!.end(); }, 200);
     }
   });
 }
