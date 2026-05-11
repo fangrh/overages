@@ -1,13 +1,26 @@
 import type { FastifyInstance } from 'fastify';
 import path from 'path';
 import fs from 'fs/promises';
-import { setWorkspacePath, getWorkspacePath, isWithinWorkspace } from './workspace.js';
+import { setWorkspacePath, getWorkspacePath, isWithinWorkspace, storeFiles, getStoredFile, hasFileStore } from './workspace.js';
+
+interface WorkspaceBody {
+  workspace: string;
+  files?: Array<{ path: string; content: string }>;
+  currentFile?: string;
+}
 
 export async function registerFileRoutes(app: FastifyInstance) {
   app.post('/workspace', async (req) => {
-    const { workspace } = req.body as { workspace: string };
+    const { workspace, files, currentFile } = req.body as WorkspaceBody;
     if (!workspace) throw new Error('workspace path required');
-    setWorkspacePath(workspace);
+
+    // If files are sent (via File System Access API), store them
+    if (files && files.length > 0) {
+      await storeFiles(files, workspace);
+    } else {
+      // Otherwise use the path directly (for native filesystem access)
+      await setWorkspacePath(workspace, currentFile);
+    }
     return { success: true };
   });
 
@@ -20,6 +33,21 @@ export async function registerFileRoutes(app: FastifyInstance) {
   app.get('/files/*', async (req, reply) => {
     // GET /files/script.py → path = "script.py"
     const filePath = (req.params as any)['*'];
+
+    // Check if we have files from File System Access API
+    if (hasFileStore()) {
+      const storedPath = getStoredFile(filePath);
+      if (storedPath) {
+        try {
+          const content = await fs.readFile(storedPath, 'utf-8');
+          return { content, path: filePath };
+        } catch {
+          reply.code(404);
+          return { error: 'File not found' };
+        }
+      }
+    }
+
     if (!isWithinWorkspace(filePath)) throw new Error('Access denied');
     const fullPath = path.join(getWorkspacePath(), filePath);
     try {
