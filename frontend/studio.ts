@@ -267,6 +267,10 @@ function renderFileTree(nodes: FileNode[], container: HTMLElement, depth = 0) {
 
 async function openFile(filePath: string) {
   currentFile = filePath;
+  sessionStorage.setItem('supergds-current-file', filePath);
+  if (workspacePath) {
+    sessionStorage.setItem('supergds-workspace', workspacePath);
+  }
   currentFileLabel.textContent = filePath.split('/').pop() || 'No file open';
   currentFileLabel.title = filePath;
 
