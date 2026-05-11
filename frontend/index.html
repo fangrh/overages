@@ -49,11 +49,12 @@
       <span id="current-file" class="current-file-label">No file open</span>
       <div style="flex: 1;"></div>
       <div id="layout-group">
-        <button id="btn-layout" title="Layout (L)" class="layout-btn">
+        <button id="btn-layout" class="layout-btn" title="Layout">
           <span id="layout-icon">⬚</span>
         </button>
         <div id="layout-menu" class="layout-menu hidden">
-          <div class="layout-option active" data-mode="split">
+          <div class="layout-menu-header">Layout Options</div>
+          <div class="layout-option" data-mode="split">
             <span class="layout-icon-text">◫</span> Split View
           </div>
           <div class="layout-option" data-mode="editor">
@@ -62,10 +63,25 @@
           <div class="layout-option" data-mode="viewer">
             <span class="layout-icon-text">◨</span> Viewer Only
           </div>
+          <div class="layout-menu-divider"></div>
+          <div class="layout-option" id="open-viewer-new-tab">
+            <span class="layout-icon-text">⧉</span> Open Viewer in New Tab
+          </div>
         </div>
       </div>
       <button id="run-btn" disabled>▶ Run</button>
       <button id="rebuild-btn" disabled>⟳ Rebuild</button>
+    </div>
+
+    <!-- Tab bar (Overleaf-style) -->
+    <div id="tab-bar">
+      <div id="editor-tab" class="tab active">
+        <span class="tab-label">Editor</span>
+      </div>
+      <div id="viewer-tab" class="tab active">
+        <span class="tab-label">PDF</span>
+        <button class="tab-close" id="viewer-tab-close" title="Close Viewer">×</button>
+      </div>
     </div>
 
     <!-- Panels: Editor + Viewer -->
@@ -73,6 +89,7 @@
       <div id="editor-pane">
         <div id="monaco-editor"></div>
       </div>
+      <div id="resize-handle" class="resize-handle"></div>
       <div id="viewer-pane">
         <!-- Overleaf-style collapse toggle -->
         <div id="viewer-collapse-toggle" class="collapse-toggle collapse-toggle-left" title="Hide Viewer (Ctrl+\)">

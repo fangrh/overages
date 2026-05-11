@@ -252,6 +252,61 @@ body {
   flex-shrink: 0;
 }
 
+/* Tab bar (Overleaf-style) */
+#tab-bar {
+  display: flex;
+  align-items: center;
+  background: #181825;
+  border-bottom: 1px solid #313244;
+  flex-shrink: 0;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  color: #6c7086;
+  border-right: 1px solid #313244;
+  transition: background 0.15s, color 0.15s;
+  user-select: none;
+}
+
+.tab:hover {
+  background: #313244;
+  color: #cdd6f4;
+}
+
+.tab.active {
+  color: #cdd6f4;
+  background: #1a1a2e;
+  border-bottom: 2px solid #89b4fa;
+}
+
+.tab .tab-close {
+  background: none;
+  border: none;
+  color: #6c7086;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.tab:hover .tab-close {
+  opacity: 1;
+}
+
+.tab .tab-close:hover {
+  background: #f38ba8;
+  color: #cdd6f4;
+}
+
 .icon-btn {
   background: none;
   border: none;
@@ -332,6 +387,29 @@ body {
   opacity: 0;
 }
 
+/* Resize handle */
+.resize-handle {
+  width: 5px;
+  cursor: col-resize;
+  background: #313244;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 10;
+  transition: background 0.15s;
+}
+
+.resize-handle:hover,
+.resize-handle.dragging {
+  background: #89b4fa;
+}
+
+/* When using fixed widths (from drag), hide resize handle in collapsed modes */
+#panels.layout-editor-only .resize-handle,
+#panels.layout-viewer-only .resize-handle {
+  display: none;
+}
+
 /* Collapse toggle arrow (Overleaf-style) */
 .collapse-toggle {
   position: absolute;
@@ -373,6 +451,29 @@ body {
 #panels.layout-editor-only .collapse-toggle-left span {
   transform: rotate(180deg);
   display: inline-block;
+}
+
+/* In layout-editor-only, show the expand arrow on the viewer pane edge */
+#panels.layout-editor-only .collapse-toggle-left {
+  opacity: 1;
+  transform: translateY(-50%) rotate(180deg);
+}
+
+/* In split mode, show the collapse arrow */
+#panels.layout-split .collapse-toggle-left {
+  opacity: 1;
+  transform: translateY(-50%) rotate(0deg);
+}
+
+/* In viewer-only, hide the collapse toggle */
+#panels.layout-viewer-only .collapse-toggle-left {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.collapse-toggle {
+  /* ... existing properties ... */
+  opacity: 1;
 }
 
 /* Layout Button */
@@ -438,6 +539,22 @@ body {
   font-size: 14px;
   width: 16px;
   text-align: center;
+}
+
+/* Layout menu header */
+.layout-menu-header {
+  padding: 8px 14px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #6c7086;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.layout-menu-divider {
+  height: 1px;
+  background: #313244;
+  margin: 4px 0;
 }
 
 #monaco-editor {

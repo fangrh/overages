@@ -94,6 +94,11 @@ const currentFileLabel = document.getElementById('current-file')!;
 const menuFile = document.getElementById('menu-file')!;
 const menuOpenFolder = document.getElementById('menu-open-folder')!;
 
+// Tab bar
+const editorTab = document.getElementById('editor-tab');
+const viewerTab = document.getElementById('viewer-tab');
+const viewerTabClose = document.getElementById('viewer-tab-close');
+
 // Layout mode
 type LayoutMode = 'split' | 'editor' | 'viewer';
 
@@ -106,9 +111,17 @@ const layoutMenu = document.getElementById('layout-menu')!;
 
 function setLayoutMode(mode: LayoutMode) {
   layoutMode = mode;
-  // Update panel class
+  // Update panel class — CSS uses full names
+  const layoutClass = mode === 'editor' ? 'layout-editor-only' :
+                      mode === 'viewer' ? 'layout-viewer-only' : 'layout-split';
   panelsContainer.classList.remove('layout-split', 'layout-editor-only', 'layout-viewer-only');
-  panelsContainer.classList.add(`layout-${mode}`);
+  panelsContainer.classList.add(layoutClass);
+  // Update tab active states
+  if (editorTab && viewerTab) {
+    const editorActive = mode !== 'viewer';
+    editorTab.classList.toggle('active', editorActive);
+    viewerTab.classList.toggle('active', mode !== 'editor');
+  }
   // Update menu active state
   if (layoutMenu) {
     layoutMenu.querySelectorAll('.layout-option').forEach(el => {
@@ -117,6 +130,11 @@ function setLayoutMode(mode: LayoutMode) {
   }
   // Persist
   sessionStorage.setItem('supergds-layout', mode);
+  // Only show resize handle in split mode
+  const resizeHandleEl = document.getElementById('resize-handle');
+  if (resizeHandleEl) {
+    resizeHandleEl.style.display = mode === 'split' ? '' : 'none';
+  }
 }
 
 // Menu handling
@@ -617,38 +635,81 @@ export function init() {
   setLayoutMode(savedLayout || 'split');
 
   // Layout mode menu
-  layoutBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    layoutMenu.classList.toggle('hidden');
-  });
+  if (layoutBtn) {
+    layoutBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      layoutMenu?.classList.toggle('hidden');
+    });
+  }
 
   document.addEventListener('click', () => {
     layoutMenu.classList.add('hidden');
   });
 
-  layoutMenu.querySelectorAll('.layout-option').forEach(el => {
-    el.addEventListener('click', () => {
-      const mode = el.getAttribute('data-mode') as LayoutMode;
-      setLayoutMode(mode);
-      layoutMenu.classList.add('hidden');
+  if (layoutMenu) {
+    layoutMenu.querySelectorAll('.layout-option').forEach(el => {
+      el.addEventListener('click', () => {
+        const mode = el.getAttribute('data-mode') as LayoutMode;
+        setLayoutMode(mode);
+        layoutMenu.classList.add('hidden');
+      });
     });
-  });
+  }
 
   // Overleaf-style collapse arrow — toggles between split and editor-only
-  collapseToggle.addEventListener('click', () => {
-    if (layoutMode === 'split') {
+  if (collapseToggle) {
+    collapseToggle.addEventListener('click', () => {
+      if (layoutMode === 'split') {
+        setLayoutMode('editor');
+      } else {
+        setLayoutMode('split');
+      }
+    });
+  }
+
+  // Viewer tab × button — closes viewer (switch to editor-only)
+  if (viewerTabClose) {
+    viewerTabClose.addEventListener('click', (e) => {
+      e.stopPropagation();
       setLayoutMode('editor');
-    } else {
+    });
+  }
+
+  // Open Viewer in New Tab
+  const openNewTabOption = document.getElementById('open-viewer-new-tab');
+  if (openNewTabOption) {
+    openNewTabOption.addEventListener('click', () => {
+      window.open('/viewer/viewer.html', '_blank');
+      layoutMenu?.classList.add('hidden');
+    });
+  }
+
+  // Keyboard shortcuts — Ctrl+\ (toggle), Ctrl+← (editor), Ctrl+→ (viewer), Ctrl+↓ (split)
+  document.addEventListener('keydown', (e) => {
+    if (!e.ctrlKey) return;
+    if (e.key === '\\') {
+      e.preventDefault();
+      if (layoutMode === 'split') setLayoutMode('editor');
+      else setLayoutMode('split');
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      setLayoutMode('editor');
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      setLayoutMode('viewer');
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
       setLayoutMode('split');
     }
   });
 
-  // Keyboard shortcut Ctrl+\ toggles viewer
-  document.addEventListener('keydown', (e) => {
-    if (e.ctrlKey && e.key === '\\') {
-      e.preventDefault();
-      if (layoutMode === 'split') setLayoutMode('editor');
-      else setLayoutMode('split');
+  // Setup resize handle (only in split mode)
+  new ResizeHandle('resize-handle', 'editor-pane', 'viewer-pane');
+  window.addEventListener('resize', () => {
+    const handle = document.getElementById('resize-handle');
+    const editorPane = document.getElementById('editor-pane');
+    if (handle && editorPane) {
+      handle.style.left = `${editorPane.getBoundingClientRect().width}px`;
     }
   });
 }
