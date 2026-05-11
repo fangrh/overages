@@ -94,6 +94,31 @@ const currentFileLabel = document.getElementById('current-file')!;
 const menuFile = document.getElementById('menu-file')!;
 const menuOpenFolder = document.getElementById('menu-open-folder')!;
 
+// Layout mode
+type LayoutMode = 'split' | 'editor' | 'viewer';
+
+let layoutMode: LayoutMode = 'split';
+const panelsContainer = document.getElementById('panels')!;
+const viewerPane = document.getElementById('viewer-pane')!;
+const collapseToggle = document.getElementById('viewer-collapse-toggle')!;
+const layoutBtn = document.getElementById('btn-layout')!;
+const layoutMenu = document.getElementById('layout-menu')!;
+
+function setLayoutMode(mode: LayoutMode) {
+  layoutMode = mode;
+  // Update panel class
+  panelsContainer.classList.remove('layout-split', 'layout-editor-only', 'layout-viewer-only');
+  panelsContainer.classList.add(`layout-${mode}`);
+  // Update menu active state
+  if (layoutMenu) {
+    layoutMenu.querySelectorAll('.layout-option').forEach(el => {
+      el.classList.toggle('active', el.getAttribute('data-mode') === mode);
+    });
+  }
+  // Persist
+  sessionStorage.setItem('supergds-layout', mode);
+}
+
 // Menu handling
 function setupMenuBar() {
   menuFile.addEventListener('click', (e) => {
@@ -587,12 +612,44 @@ export function init() {
   // Restore workspace from server-persisted state
   restoreWorkspace();
 
-  // Setup resize handle
-  new ResizeHandle('resize-handle', 'editor-pane', 'viewer-pane');
-  window.addEventListener('resize', () => {
-    const handle = document.getElementById('resize-handle')!;
-    const editorPane = document.getElementById('editor-pane')!;
-    handle.style.left = `${editorPane.getBoundingClientRect().width}px`;
+  // Restore layout mode from sessionStorage
+  const savedLayout = sessionStorage.getItem('supergds-layout') as LayoutMode | null;
+  setLayoutMode(savedLayout || 'split');
+
+  // Layout mode menu
+  layoutBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    layoutMenu.classList.toggle('hidden');
+  });
+
+  document.addEventListener('click', () => {
+    layoutMenu.classList.add('hidden');
+  });
+
+  layoutMenu.querySelectorAll('.layout-option').forEach(el => {
+    el.addEventListener('click', () => {
+      const mode = el.getAttribute('data-mode') as LayoutMode;
+      setLayoutMode(mode);
+      layoutMenu.classList.add('hidden');
+    });
+  });
+
+  // Overleaf-style collapse arrow — toggles between split and editor-only
+  collapseToggle.addEventListener('click', () => {
+    if (layoutMode === 'split') {
+      setLayoutMode('editor');
+    } else {
+      setLayoutMode('split');
+    }
+  });
+
+  // Keyboard shortcut Ctrl+\ toggles viewer
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.key === '\\') {
+      e.preventDefault();
+      if (layoutMode === 'split') setLayoutMode('editor');
+      else setLayoutMode('split');
+    }
   });
 }
 

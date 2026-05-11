@@ -48,6 +48,22 @@
     <div id="toolbar">
       <span id="current-file" class="current-file-label">No file open</span>
       <div style="flex: 1;"></div>
+      <div id="layout-group">
+        <button id="btn-layout" title="Layout (L)" class="layout-btn">
+          <span id="layout-icon">⬚</span>
+        </button>
+        <div id="layout-menu" class="layout-menu hidden">
+          <div class="layout-option active" data-mode="split">
+            <span class="layout-icon-text">◫</span> Split View
+          </div>
+          <div class="layout-option" data-mode="editor">
+            <span class="layout-icon-text">◧</span> Editor Only
+          </div>
+          <div class="layout-option" data-mode="viewer">
+            <span class="layout-icon-text">◨</span> Viewer Only
+          </div>
+        </div>
+      </div>
       <button id="run-btn" disabled>▶ Run</button>
       <button id="rebuild-btn" disabled>⟳ Rebuild</button>
     </div>
@@ -57,8 +73,11 @@
       <div id="editor-pane">
         <div id="monaco-editor"></div>
       </div>
-      <div id="resize-handle" class="resize-handle"></div>
       <div id="viewer-pane">
+        <!-- Overleaf-style collapse toggle -->
+        <div id="viewer-collapse-toggle" class="collapse-toggle collapse-toggle-left" title="Hide Viewer (Ctrl+\)">
+          <span>◀</span>
+        </div>
         <iframe id="gds-viewer" src="/viewer/viewer.html"></iframe>
       </div>
     </div>
