@@ -94,12 +94,24 @@ test.describe('Resize Handle', () => {
     expect(after).toBeGreaterThan(before + 50);
   });
 
-  test('R5: after drag, flex and width are cleared (PASSING)', async ({ page }) => {
+  test('R5: after drag, both panels are locked at dragged sizes', async ({ page }) => {
     await dragHandleBy(page, 80);
-    const flex = await getEditorInlineFlex(page);
-    const width = await getEditorInlineWidth(page);
-    expect(flex).toBe('');
-    expect(width).toBe('');
+    const editorWidth = await getEditorInlineWidth(page);
+    const viewerWidthVal = await page.evaluate(() => {
+      const vp = document.getElementById('viewer-pane');
+      return vp ? vp.style.width : '';
+    });
+    // Editor should have a fixed px width (not empty)
+    expect(parseFloat(editorWidth)).toBeGreaterThan(200);
+    // Viewer should also have a fixed px width
+    expect(parseFloat(viewerWidthVal)).toBeGreaterThan(200);
+    // The total should approximately equal the panels width (within 20px)
+    const containerWidth = await page.evaluate(() => {
+      const p = document.getElementById('panels');
+      return p ? p.getBoundingClientRect().width : 0;
+    });
+    const total = parseFloat(editorWidth) + parseFloat(viewerWidthVal);
+    expect(Math.abs(total - containerWidth)).toBeLessThan(20);
   });
 
   test('R6: handle left is a valid px value after drag', async ({ page }) => {

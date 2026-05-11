@@ -45,8 +45,9 @@
         if (this.dragging) {
           this.dragging = false;
           this.handle.classList.remove("dragging");
-          this.editorPane.style.flex = "";
-          this.editorPane.style.width = "";
+          const remainingWidth = this.viewerPane.parentElement.getBoundingClientRect().width - parseFloat(this.handle.style.left || "0");
+          this.viewerPane.style.flex = "none";
+          this.viewerPane.style.width = `${remainingWidth}px`;
         }
       }, true);
     }
@@ -95,7 +96,19 @@
       });
     }
     sessionStorage.setItem("supergds-layout", mode);
+    const editorPaneEl = document.getElementById("editor-pane");
+    const viewerPaneEl = document.getElementById("viewer-pane");
     const resizeHandleEl = document.getElementById("resize-handle");
+    if (mode !== "split") {
+      if (editorPaneEl) {
+        editorPaneEl.style.flex = "";
+        editorPaneEl.style.width = "";
+      }
+      if (viewerPaneEl) {
+        viewerPaneEl.style.flex = "";
+        viewerPaneEl.style.width = "";
+      }
+    }
     if (resizeHandleEl) {
       resizeHandleEl.style.display = mode === "split" ? "" : "none";
     }
