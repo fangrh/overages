@@ -395,7 +395,7 @@ body {
   position: absolute;
   top: 0;
   bottom: 0;
-  z-index: 10;
+  z-index: 20;
   transition: background 0.15s;
 }
 

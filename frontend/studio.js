@@ -27,6 +27,7 @@
         this.startEditorWidth = this.editorPane.getBoundingClientRect().width;
         this.handle.classList.add("dragging");
         e.preventDefault();
+        e.stopPropagation();
       });
       window.addEventListener("mousemove", (e) => {
         if (!this.dragging) return;
@@ -38,13 +39,19 @@
         const clamped = Math.max(minWidth, Math.min(maxWidth, newWidth));
         this.editorPane.style.flex = "none";
         this.editorPane.style.width = `${clamped}px`;
-      });
+        this.handle.style.left = `${clamped}px`;
+      }, true);
       window.addEventListener("mouseup", () => {
         if (this.dragging) {
           this.dragging = false;
           this.handle.classList.remove("dragging");
+          this.editorPane.style.flex = "";
+          this.editorPane.style.width = "";
         }
-      });
+      }, true);
+    }
+    isDragging() {
+      return this.dragging;
     }
     updateHandlePosition() {
       const editorRect = this.editorPane.getBoundingClientRect();
@@ -63,6 +70,36 @@
   var currentFileLabel = document.getElementById("current-file");
   var menuFile = document.getElementById("menu-file");
   var menuOpenFolder = document.getElementById("menu-open-folder");
+  var editorTab = document.getElementById("editor-tab");
+  var viewerTab = document.getElementById("viewer-tab");
+  var viewerTabClose = document.getElementById("viewer-tab-close");
+  var layoutMode = "split";
+  var panelsContainer = document.getElementById("panels");
+  var viewerPane = document.getElementById("viewer-pane");
+  var collapseToggle = document.getElementById("viewer-collapse-toggle");
+  var layoutBtn = document.getElementById("btn-layout");
+  var layoutMenu = document.getElementById("layout-menu");
+  function setLayoutMode(mode) {
+    layoutMode = mode;
+    const layoutClass = mode === "editor" ? "layout-editor-only" : mode === "viewer" ? "layout-viewer-only" : "layout-split";
+    panelsContainer.classList.remove("layout-split", "layout-editor-only", "layout-viewer-only");
+    panelsContainer.classList.add(layoutClass);
+    if (editorTab && viewerTab) {
+      const editorActive = mode !== "viewer";
+      editorTab.classList.toggle("active", editorActive);
+      viewerTab.classList.toggle("active", mode !== "editor");
+    }
+    if (layoutMenu) {
+      layoutMenu.querySelectorAll(".layout-option").forEach((el) => {
+        el.classList.toggle("active", el.getAttribute("data-mode") === mode);
+      });
+    }
+    sessionStorage.setItem("supergds-layout", mode);
+    const resizeHandleEl = document.getElementById("resize-handle");
+    if (resizeHandleEl) {
+      resizeHandleEl.style.display = mode === "split" ? "" : "none";
+    }
+  }
   function setupMenuBar() {
     menuFile.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -431,11 +468,72 @@
     clearBtn.addEventListener("click", () => terminal.clear());
     window.studio = { editor, bridge, terminal };
     restoreWorkspace();
-    new ResizeHandle("resize-handle", "editor-pane", "viewer-pane");
+    const savedLayout = sessionStorage.getItem("supergds-layout");
+    setLayoutMode(savedLayout || "split");
+    if (layoutBtn) {
+      layoutBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        layoutMenu?.classList.toggle("hidden");
+      });
+    }
+    document.addEventListener("click", () => {
+      layoutMenu.classList.add("hidden");
+    });
+    if (layoutMenu) {
+      layoutMenu.querySelectorAll(".layout-option").forEach((el) => {
+        el.addEventListener("click", () => {
+          const mode = el.getAttribute("data-mode");
+          setLayoutMode(mode);
+          layoutMenu.classList.add("hidden");
+        });
+      });
+    }
+    if (collapseToggle) {
+      collapseToggle.addEventListener("click", () => {
+        if (layoutMode === "split") {
+          setLayoutMode("editor");
+        } else {
+          setLayoutMode("split");
+        }
+      });
+    }
+    if (viewerTabClose) {
+      viewerTabClose.addEventListener("click", (e) => {
+        e.stopPropagation();
+        setLayoutMode("editor");
+      });
+    }
+    const openNewTabOption = document.getElementById("open-viewer-new-tab");
+    if (openNewTabOption) {
+      openNewTabOption.addEventListener("click", () => {
+        window.open("/viewer/viewer.html", "_blank");
+        layoutMenu?.classList.add("hidden");
+      });
+    }
+    document.addEventListener("keydown", (e) => {
+      if (!e.ctrlKey) return;
+      if (e.key === "\\") {
+        e.preventDefault();
+        if (layoutMode === "split") setLayoutMode("editor");
+        else setLayoutMode("split");
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        setLayoutMode("editor");
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        setLayoutMode("viewer");
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setLayoutMode("split");
+      }
+    });
+    const resizeHandle = new ResizeHandle("resize-handle", "editor-pane", "viewer-pane");
     window.addEventListener("resize", () => {
       const handle = document.getElementById("resize-handle");
       const editorPane = document.getElementById("editor-pane");
-      handle.style.left = `${editorPane.getBoundingClientRect().width}px`;
+      if (handle && editorPane && !resizeHandle.isDragging()) {
+        handle.style.left = `${editorPane.getBoundingClientRect().width}px`;
+      }
     });
   }
   async function restoreWorkspace() {

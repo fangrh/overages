@@ -52,6 +52,7 @@ class ResizeHandle {
       this.startEditorWidth = this.editorPane.getBoundingClientRect().width;
       this.handle.classList.add('dragging');
       e.preventDefault();
+      e.stopPropagation();
     });
 
     window.addEventListener('mousemove', (e) => {
@@ -64,14 +65,22 @@ class ResizeHandle {
       const clamped = Math.max(minWidth, Math.min(maxWidth, newWidth));
       this.editorPane.style.flex = 'none';
       this.editorPane.style.width = `${clamped}px`;
-    });
+      this.handle.style.left = `${clamped}px`;
+    }, true);
 
     window.addEventListener('mouseup', () => {
       if (this.dragging) {
         this.dragging = false;
         this.handle.classList.remove('dragging');
+        // Restore flex behavior after drag
+        this.editorPane.style.flex = '';
+        this.editorPane.style.width = '';
       }
-    });
+    }, true);
+  }
+
+  isDragging(): boolean {
+    return this.dragging;
   }
 
   updateHandlePosition(): void {
@@ -704,11 +713,11 @@ export function init() {
   });
 
   // Setup resize handle (only in split mode)
-  new ResizeHandle('resize-handle', 'editor-pane', 'viewer-pane');
+  const resizeHandle = new ResizeHandle('resize-handle', 'editor-pane', 'viewer-pane');
   window.addEventListener('resize', () => {
     const handle = document.getElementById('resize-handle');
     const editorPane = document.getElementById('editor-pane');
-    if (handle && editorPane) {
+    if (handle && editorPane && !resizeHandle.isDragging()) {
       handle.style.left = `${editorPane.getBoundingClientRect().width}px`;
     }
   });
