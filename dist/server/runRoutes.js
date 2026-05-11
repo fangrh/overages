@@ -2,8 +2,8 @@ import { runPythonScript } from '../lib/pythonRunner.js';
 import { getWorkspacePath } from './workspace.js';
 import path from 'path';
 export async function registerRunRoutes(app) {
-    app.post('/api/run', async (req, reply) => {
-        const { pythonFile } = req.body;
+    app.get('/api/run', async (req, reply) => {
+        const { pythonFile } = req.query;
         if (!pythonFile)
             throw new Error('pythonFile required');
         const ws = getWorkspacePath();

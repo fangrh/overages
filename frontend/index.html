@@ -7,31 +7,76 @@
 <link rel="stylesheet" href="/studio.css">
 </head>
 <body>
-<div id="toolbar">
-  <button id="open-folder-btn">Open Folder</button>
-  <input type="file" id="folder-input" webkitdirectory style="display:none">
-  <button id="run-btn" disabled>▶ Run</button>
-  <button id="rebuild-btn" disabled>⟳ Rebuild</button>
-  <select id="file-select" disabled><option>No file open</option></select>
+<!-- Left: Activity Bar + Sidebar -->
+<div id="left-panel">
+  <!-- Activity Bar (left icons) -->
+  <div id="activity-bar">
+    <div id="activity-explorer" class="activity-icon active" title="Explorer">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+        <path d="M3 3h7v7H3V3zm11 0h7v7h-7V3zM3 14h7v7H3v-7zm11 0h7v7h-7v-7z"/>
+      </svg>
+    </div>
+  </div>
+
+  <!-- Sidebar with File Explorer -->
+  <div id="sidebar">
+    <div class="sidebar-header">
+      <span class="sidebar-title">EXPLORER</span>
+    </div>
+    <div id="file-tree"></div>
+  </div>
 </div>
 
-<div id="panels">
-  <div id="editor-pane">
-    <div id="monaco-editor"></div>
+<!-- Right: Main column with Menu Bar + Content -->
+<div id="main-column">
+  <!-- Menu Bar -->
+  <div id="menu-bar">
+    <div class="menu-item" id="menu-file">
+      <span class="menu-title">File</span>
+      <div class="menu-dropdown" id="file-dropdown">
+        <div class="menu-option" id="menu-open-folder">
+          <span>Open Folder</span>
+          <span class="menu-shortcut">⌘O</span>
+        </div>
+      </div>
+    </div>
   </div>
-  <div id="resize-handle" class="resize-handle"></div>
-  <div id="viewer-pane">
-    <iframe id="gds-viewer" src="/viewer/viewer.html"></iframe>
+
+  <!-- Main Content (Editor + Viewer + Terminal) -->
+  <div id="main-content">
+    <!-- Toolbar -->
+    <div id="toolbar">
+      <span id="current-file" class="current-file-label">No file open</span>
+      <div style="flex: 1;"></div>
+      <button id="run-btn" disabled>▶ Run</button>
+      <button id="rebuild-btn" disabled>⟳ Rebuild</button>
+    </div>
+
+    <!-- Panels: Editor + Viewer -->
+    <div id="panels">
+      <div id="editor-pane">
+        <div id="monaco-editor"></div>
+      </div>
+      <div id="resize-handle" class="resize-handle"></div>
+      <div id="viewer-pane">
+        <iframe id="gds-viewer" src="/viewer/viewer.html"></iframe>
+      </div>
+    </div>
+
+    <!-- Terminal -->
+    <div id="terminal">
+      <div id="terminal-header">
+        <span>Terminal</span>
+        <div style="flex: 1;"></div>
+        <button id="clear-terminal">clear</button>
+      </div>
+      <div id="terminal-body"></div>
+    </div>
   </div>
 </div>
 
-<div id="terminal">
-  <div id="terminal-header">
-    <span>Terminal</span>
-    <button id="clear-terminal">clear</button>
-  </div>
-  <div id="terminal-body"></div>
-</div>
+<!-- Hidden folder input -->
+<input type="file" id="folder-input" webkitdirectory style="display:none">
 
 <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.55.1/min/vs/loader.js"></script>
 <script>

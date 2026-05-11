@@ -60,21 +60,34 @@ export async function runPythonScript(
 
 async function findGdsOutput(cwd: string, outputDir?: string): Promise<string | null> {
   const dir = outputDir ? path.join(cwd, outputDir) : cwd;
-  try {
-    const files = await fs.readdir(dir);
-    const gdsFiles = files.filter((f) => f.endsWith('.gds'));
-    if (gdsFiles.length === 0) return null;
 
-    // Sort by mtime descending
-    const withTimes = await Promise.all(
-      gdsFiles.map(async (f) => ({
-        f,
-        mtime: (await fs.stat(path.join(dir, f))).mtimeMs,
-      }))
-    );
-    withTimes.sort((a, b) => b.mtime - a.mtime);
-    return path.join(dir, withTimes[0].f);
-  } catch {
-    return null;
+  // Recursively find all .gds files
+  async function findGdsRecursive(searchDir: string): Promise<string[]> {
+    let results: string[] = [];
+    try {
+      const entries = await fs.readdir(searchDir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(searchDir, entry.name);
+        if (entry.isDirectory()) {
+          results = results.concat(await findGdsRecursive(fullPath));
+        } else if (entry.name.endsWith('.gds')) {
+          results.push(fullPath);
+        }
+      }
+    } catch { /* skip unreadable dirs */ }
+    return results;
   }
+
+  const gdsFiles = await findGdsRecursive(dir);
+  if (gdsFiles.length === 0) return null;
+
+  // Sort by mtime descending — return the most recently modified
+  const withTimes = await Promise.all(
+    gdsFiles.map(async (f) => ({
+      f,
+      mtime: (await fs.stat(f)).mtimeMs,
+    }))
+  );
+  withTimes.sort((a, b) => b.mtime - a.mtime);
+  return withTimes[0].f;
 }
