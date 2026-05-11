@@ -30,6 +30,16 @@ export async function registerFileRoutes(app: FastifyInstance) {
     return { files };
   });
 
+  // Return current workspace state so frontend can restore
+  app.get('/api/workspace', async () => {
+    try {
+      const ws = getWorkspacePath();
+      return { workspace: ws };
+    } catch {
+      return { workspace: null };
+    }
+  });
+
   app.get('/files/*', async (req, reply) => {
     // GET /files/script.py → path = "script.py"
     const filePath = (req.params as any)['*'];

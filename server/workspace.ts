@@ -1,6 +1,7 @@
 import path from 'path';
 import os from 'os';
-import fs from 'fs/promises';
+import fs from 'fs';
+import { mkdir, writeFile } from 'fs/promises';
 
 // Singleton workspace path — set once per server instance (one user per launch)
 let workspacePath: string | null = null;
@@ -14,26 +15,21 @@ interface WorkspaceState {
   currentFile: string | null;
 }
 
-async function loadState(): Promise<WorkspaceState> {
-  try {
-    const raw = await fs.readFile(STATE_FILE, 'utf-8');
-    return JSON.parse(raw);
-  } catch {
-    return { workspacePath: null, currentFile: null };
-  }
-}
-
-async function saveState(state: WorkspaceState): Promise<void> {
-  await fs.writeFile(STATE_FILE, JSON.stringify(state, null, 2), 'utf-8');
-}
-
-// Load persisted state on startup
-loadState().then(state => {
+// Synchronous initial load — blocks until state is read
+try {
+  const raw = fs.readFileSync(STATE_FILE, 'utf-8');
+  const state = JSON.parse(raw) as WorkspaceState;
   if (state.workspacePath) {
     workspacePath = state.workspacePath;
     console.log('[workspace] restored workspace:', workspacePath);
   }
-}).catch(() => {});
+} catch {
+  // No state file yet — nothing to restore
+}
+
+async function saveState(state: WorkspaceState): Promise<void> {
+  await writeFile(STATE_FILE, JSON.stringify(state, null, 2), 'utf-8');
+}
 
 export async function setWorkspacePath(p: string, currentFile?: string | null): Promise<void> {
   workspacePath = p;
@@ -70,13 +66,13 @@ export async function storeFiles(
 ): Promise<void> {
   // Create a temp directory for these files
   const tempDir = path.join(os.tmpdir(), `supergds-${workspaceName}-${Date.now()}`);
-  await fs.mkdir(tempDir, { recursive: true });
+  await mkdir(tempDir, { recursive: true });
 
   // Write each file to the temp directory
   for (const file of files) {
     const fullPath = path.join(tempDir, file.path);
-    await fs.mkdir(path.dirname(fullPath), { recursive: true });
-    await fs.writeFile(fullPath, file.content, 'utf-8');
+    await mkdir(path.dirname(fullPath), { recursive: true });
+    await writeFile(fullPath, file.content, 'utf-8');
     // Also store in memory for quick access
     fileStore.set(file.path, fullPath);
   }

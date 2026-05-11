@@ -412,12 +412,6 @@ async function openWorkspace(folderPath: string) {
     return;
   }
 
-  // Restore previously open file if any
-  const savedFile = sessionStorage.getItem('supergds-current-file');
-  if (savedFile) {
-    openFile(savedFile).catch(() => {});
-  }
-
   terminal.addLine('system', `Opened folder: ${folderPath}`);
   await loadFileTree();
 }
@@ -590,20 +584,8 @@ export function init() {
   // Expose studio for debugging
   (window as any).studio = { editor, bridge, terminal };
 
-  // Restore session — re-establish workspace on server
-  // Skip restore for browser-uploaded files (temp dir lost on server restart)
-  const savedWs = sessionStorage.getItem('supergds-workspace');
-  if (savedWs && savedWs.includes('/')) {
-    // Absolute path — native filesystem workspace, safe to restore
-    workspacePath = savedWs;
-    openWorkspace(savedWs).catch(() => {
-      sessionStorage.removeItem('supergds-workspace');
-      terminal.addLine('system', 'Workspace no longer available. Please re-open folder.');
-    });
-  } else if (savedWs) {
-    // Relative/folder-name only — was a browser upload, temp dir is gone
-    sessionStorage.removeItem('supergds-workspace');
-  }
+  // Restore workspace from server-persisted state
+  restoreWorkspace();
 
   // Setup resize handle
   new ResizeHandle('resize-handle', 'editor-pane', 'viewer-pane');
@@ -612,6 +594,20 @@ export function init() {
     const editorPane = document.getElementById('editor-pane')!;
     handle.style.left = `${editorPane.getBoundingClientRect().width}px`;
   });
+}
+
+async function restoreWorkspace() {
+  try {
+    const res = await fetch('/api/workspace');
+    const data = await res.json();
+    if (data.workspace) {
+      workspacePath = data.workspace;
+      sessionStorage.setItem('supergds-workspace', data.workspace);
+      await openWorkspace(data.workspace);
+    }
+  } catch {
+    // No persisted workspace — user will open one manually
+  }
 }
 
 init();
