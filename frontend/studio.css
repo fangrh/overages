@@ -343,6 +343,19 @@ body {
 #toolbar button:hover { background: #585b70; }
 #toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
 
+#python-env-select {
+  padding: 4px 8px;
+  background: #313244;
+  color: #cdd6f4;
+  border: 1px solid #585b70;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  max-width: 200px;
+}
+
+#python-env-select:hover { background: #45475a; }
+
 /* ============================================
    Layout Modes — Split / Editor-Only / Viewer-Only
    ============================================ */

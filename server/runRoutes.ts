@@ -5,7 +5,7 @@ import path from 'path';
 
 export async function registerRunRoutes(app: FastifyInstance) {
   app.get('/api/run', async (req: FastifyRequest, reply: FastifyReply) => {
-    const { pythonFile } = req.query as { pythonFile: string };
+    const { pythonFile, pythonPath } = req.query as { pythonFile: string; pythonPath?: string };
     if (!pythonFile) throw new Error('pythonFile required');
 
     const ws = getWorkspacePath();
@@ -25,7 +25,7 @@ export async function registerRunRoutes(app: FastifyInstance) {
 
     try {
       const result = await runPythonScript(
-        { pythonFile: fullPath, cwd: ws },
+        { pythonFile: fullPath, cwd: ws, pythonPath },
         (line) => send('stdout', { line }),
         (line) => send('stderr', { line })
       );

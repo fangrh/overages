@@ -46,50 +46,72 @@ class ResizeHandle {
   }
 
   private setupEvents(): void {
-    this.handle.addEventListener('mousedown', (e) => {
+    this.handle.addEventListener('pointerdown', (e) => {
       this.dragging = true;
       this.startX = e.clientX;
       this.startEditorWidth = this.editorPane.getBoundingClientRect().width;
       this.handle.classList.add('dragging');
       // Disable flex transition during drag so panels track handle position in real-time
       this.editorPane.parentElement!.classList.add('no-transition');
+      // Capture pointer so mouseup fires even when cursor leaves the window
+      this.handle.setPointerCapture(e.pointerId);
       e.preventDefault();
       e.stopPropagation();
     });
 
-    window.addEventListener('mousemove', (e) => {
-      if (!this.dragging) return;
+    // Use window-level listeners to catch all pointermove events during capture
+    window.addEventListener('pointermove', (e) => {
+      if (!this.dragging) {
+        console.log('[drag] pointermove but not dragging');
+        return;
+      }
       const dx = e.clientX - this.startX;
       const newWidth = this.startEditorWidth + dx;
       const containerWidth = this.editorPane.parentElement!.getBoundingClientRect().width;
       const minWidth = 200;
-      const maxWidth = containerWidth - minWidth - 5;
-      const clamped = Math.max(minWidth, Math.min(maxWidth, newWidth));
-      // Lock BOTH panels at explicit pixel widths so the resize is symmetric.
-      // Flex distribution only works reliably when shrinking (LEFT drag);
-      // when growing (RIGHT drag) the flex algorithm doesn't compress
-      // siblings that have explicit inline widths set on their neighbors.
       const handleWidth = 5;
+      // Clamp editor width so viewer always has at least minWidth
+      const clamped = Math.max(minWidth, Math.min(containerWidth - minWidth - handleWidth, newWidth));
       const remainingWidth = containerWidth - clamped - handleWidth;
       this.editorPane.style.flex = 'none';
       this.editorPane.style.width = `${clamped}px`;
       this.viewerPane.style.flex = 'none';
       this.viewerPane.style.width = `${remainingWidth}px`;
       this.handle.style.left = `${clamped}px`;
-    }, true);
-
-    window.addEventListener('mouseup', () => {
-      if (this.dragging) {
-        this.dragging = false;
-        this.handle.classList.remove('dragging');
-        // Re-enable flex transition (without re-triggering it by setting flex again)
-        this.editorPane.parentElement!.classList.remove('no-transition');
-        // Lock both panels at their current widths — don't restore flex, it would reset the sizes
-        const remainingWidth = this.viewerPane.parentElement!.getBoundingClientRect().width - parseFloat(this.handle.style.left || '0');
-        this.viewerPane.style.flex = 'none';
-        this.viewerPane.style.width = `${remainingWidth}px`;
+      console.log(`[drag] dx=${dx} newWidth=${newWidth} clamped=${clamped} remaining=${remainingWidth}`);
+      // Force iframe to recalculate its content size by triggering a reflow
+      const iframe = document.getElementById('gds-viewer') as HTMLIFrameElement;
+      if (iframe) {
+        // Toggle width to force reflow
+        iframe.style.width = '99%';
+        void iframe.offsetWidth;
+        iframe.style.width = '';
       }
     }, true);
+
+    window.addEventListener('pointerup', (e) => {
+      if (!this.dragging) return;
+      this.dragging = false;
+      this.handle.classList.remove('dragging');
+      // Re-enable flex transition
+      this.editorPane.parentElement!.classList.remove('no-transition');
+      // Lock both panels at their current widths
+      const remainingWidth = this.viewerPane.parentElement!.getBoundingClientRect().width - parseFloat(this.handle.style.left || '0');
+      this.viewerPane.style.flex = 'none';
+      this.viewerPane.style.width = `${remainingWidth}px`;
+      this.handle.releasePointerCapture(e.pointerId);
+      // Notify viewer iframe to update its map size
+      const iframe = document.getElementById('gds-viewer') as HTMLIFrameElement;
+      iframe?.contentWindow?.postMessage({ type: 'resize' }, '*');
+    }, true);
+
+    this.handle.addEventListener('pointercancel', (e) => {
+      if (!this.dragging) return;
+      this.dragging = false;
+      this.handle.classList.remove('dragging');
+      this.editorPane.parentElement!.classList.remove('no-transition');
+      this.handle.releasePointerCapture(e.pointerId);
+    });
   }
 
   isDragging(): boolean {
@@ -115,6 +137,7 @@ const sidebar = document.getElementById('sidebar')!;
 const currentFileLabel = document.getElementById('current-file')!;
 const menuFile = document.getElementById('menu-file')!;
 const menuOpenFolder = document.getElementById('menu-open-folder')!;
+const pythonEnvSelect = document.getElementById('python-env-select') as HTMLSelectElement;;
 
 // Tab bar
 const editorTab = document.getElementById('editor-tab');
@@ -562,6 +585,35 @@ async function openWorkspaceViaHandle(dirHandle: FileSystemDirectoryHandle) {
   await loadFileTree();
 }
 
+async function loadPythonEnvironments() {
+  if (!pythonEnvSelect) return;
+
+  try {
+    const res = await fetch('/api/python-environments');
+    if (!res.ok) {
+      console.error('Failed to load Python environments:', res.status);
+      return;
+    }
+
+    const { environments } = await res.json();
+
+    // Clear and populate the dropdown
+    pythonEnvSelect.innerHTML = '';
+    for (const env of environments) {
+      const option = document.createElement('option');
+      option.value = env.path;
+      option.textContent = env.name;
+      option.title = env.path;
+      if (env.isActive) {
+        option.selected = true;
+      }
+      pythonEnvSelect.appendChild(option);
+    }
+  } catch (err) {
+    console.error('Error loading Python environments:', err);
+  }
+}
+
 async function loadFileTree() {
   const res = await fetch('/api/files');
   if (!res.ok) {
@@ -609,10 +661,12 @@ async function handleRun() {
   if (!currentFile) return;
   await saveCurrentFile();
   terminal.clear();
+  const pythonPath = pythonEnvSelect?.value;
+  const pythonPathParam = pythonPath ? `&pythonPath=${encodeURIComponent(pythonPath)}` : '';
   terminal.addLine('system', `$ python ${currentFile}`);
 
   let completed = false;
-  const es = new EventSource(`/api/run?pythonFile=${encodeURIComponent(currentFile)}`);
+  const es = new EventSource(`/api/run?pythonFile=${encodeURIComponent(currentFile)}${pythonPathParam}`);
   es.addEventListener('start', (e: MessageEvent) => terminal.addLine('stdout', (JSON.parse(e.data)).status));
   es.addEventListener('stdout', (e: MessageEvent) => terminal.addLine('stdout', (JSON.parse(e.data)).line));
   es.addEventListener('stderr', (e: MessageEvent) => terminal.addLine('stderr', (JSON.parse(e.data)).line));
@@ -663,6 +717,9 @@ export function init() {
 
   // Restore workspace from server-persisted state
   restoreWorkspace();
+
+  // Load Python environments
+  loadPythonEnvironments();
 
   // Restore layout mode from sessionStorage
   const savedLayout = sessionStorage.getItem('supergds-layout') as LayoutMode | null;

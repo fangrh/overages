@@ -6,6 +6,7 @@ export interface RunOptions {
   pythonFile: string;
   cwd: string;
   gdsOutputDir?: string;
+  pythonPath?: string; // Optional specific Python path to use
 }
 
 export interface BuildResult {
@@ -21,8 +22,13 @@ export async function runPythonScript(
   onStderr: (line: string) => void
 ): Promise<BuildResult> {
   return new Promise((resolve, reject) => {
-    const python = spawn('python', [opts.pythonFile], {
+    // Run with GDS_PROVENANCE=1 to capture provenance data
+    const env = { ...process.env, GDS_PROVENANCE: '1' };
+    // Use selected Python path if provided, otherwise default to 'python'
+    const pythonExecutable = opts.pythonPath || 'python';
+    const python = spawn(pythonExecutable, [opts.pythonFile], {
       cwd: opts.cwd,
+      env,
     });
 
     let stderrData = '';
@@ -53,7 +59,17 @@ export async function runPythonScript(
       const { parseGdsFile } = await import('./gdsParser.js');
       const geojson = await parseGdsFile(gdsPath);
 
-      resolve({ gdsPath, geojson, annotations: [], mode: 'full' });
+      // Check if provenance sidecar exists
+      const sidecarPath = gdsPath.replace(/\.gds$/i, '.provenance.json');
+      let mode: 'full' | 'partial' = 'partial';
+      try {
+        await fs.access(sidecarPath);
+        mode = 'full';
+      } catch {
+        // No sidecar - provenance not captured
+      }
+
+      resolve({ gdsPath, geojson, annotations: [], mode });
     });
   });
 }
