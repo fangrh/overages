@@ -38,8 +38,12 @@
         const minWidth = 200;
         const maxWidth = containerWidth - minWidth - 5;
         const clamped = Math.max(minWidth, Math.min(maxWidth, newWidth));
+        const handleWidth = 5;
+        const remainingWidth = containerWidth - clamped - handleWidth;
         this.editorPane.style.flex = "none";
         this.editorPane.style.width = `${clamped}px`;
+        this.viewerPane.style.flex = "none";
+        this.viewerPane.style.width = `${remainingWidth}px`;
         this.handle.style.left = `${clamped}px`;
       }, true);
       window.addEventListener("mouseup", () => {
@@ -565,4 +569,3 @@
   }
   init();
 })();
-//# sourceMappingURL=studio.js.map

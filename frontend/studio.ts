@@ -65,8 +65,16 @@ class ResizeHandle {
       const minWidth = 200;
       const maxWidth = containerWidth - minWidth - 5;
       const clamped = Math.max(minWidth, Math.min(maxWidth, newWidth));
+      // Lock BOTH panels at explicit pixel widths so the resize is symmetric.
+      // Flex distribution only works reliably when shrinking (LEFT drag);
+      // when growing (RIGHT drag) the flex algorithm doesn't compress
+      // siblings that have explicit inline widths set on their neighbors.
+      const handleWidth = 5;
+      const remainingWidth = containerWidth - clamped - handleWidth;
       this.editorPane.style.flex = 'none';
       this.editorPane.style.width = `${clamped}px`;
+      this.viewerPane.style.flex = 'none';
+      this.viewerPane.style.width = `${remainingWidth}px`;
       this.handle.style.left = `${clamped}px`;
     }, true);
 
