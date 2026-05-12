@@ -26,6 +26,7 @@
         this.startX = e.clientX;
         this.startEditorWidth = this.editorPane.getBoundingClientRect().width;
         this.handle.classList.add("dragging");
+        this.editorPane.parentElement.classList.add("no-transition");
         e.preventDefault();
         e.stopPropagation();
       });
@@ -45,6 +46,7 @@
         if (this.dragging) {
           this.dragging = false;
           this.handle.classList.remove("dragging");
+          this.editorPane.parentElement.classList.remove("no-transition");
           const remainingWidth = this.viewerPane.parentElement.getBoundingClientRect().width - parseFloat(this.handle.style.left || "0");
           this.viewerPane.style.flex = "none";
           this.viewerPane.style.width = `${remainingWidth}px`;

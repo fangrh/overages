@@ -410,6 +410,12 @@ body {
   display: none;
 }
 
+/* During drag: disable flex transition so panels track handle in real-time */
+#panels.no-transition #editor-pane,
+#panels.no-transition #viewer-pane {
+  transition: none !important;
+}
+
 /* Collapse toggle arrow (Overleaf-style) */
 .collapse-toggle {
   position: absolute;

@@ -51,6 +51,8 @@ class ResizeHandle {
       this.startX = e.clientX;
       this.startEditorWidth = this.editorPane.getBoundingClientRect().width;
       this.handle.classList.add('dragging');
+      // Disable flex transition during drag so panels track handle position in real-time
+      this.editorPane.parentElement!.classList.add('no-transition');
       e.preventDefault();
       e.stopPropagation();
     });
@@ -72,6 +74,8 @@ class ResizeHandle {
       if (this.dragging) {
         this.dragging = false;
         this.handle.classList.remove('dragging');
+        // Re-enable flex transition (without re-triggering it by setting flex again)
+        this.editorPane.parentElement!.classList.remove('no-transition');
         // Lock both panels at their current widths — don't restore flex, it would reset the sizes
         const remainingWidth = this.viewerPane.parentElement!.getBoundingClientRect().width - parseFloat(this.handle.style.left || '0');
         this.viewerPane.style.flex = 'none';
