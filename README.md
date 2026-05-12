@@ -8,7 +8,7 @@ A visual editor for GDS layout generation with Python scripting.
 
 This project uses a custom fork of gdsfactory that adds provenance tracking capabilities:
 
-**Fork URL:** https://github.com/simbilod/gdsfactory
+**Fork URL:** https://github.com/fangrh/gdsfactory
 
 **Local fork location:** `/Users/fangruihuan/Desktop/aalto/superGDS/gdsfactory`
 
