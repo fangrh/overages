@@ -35,3 +35,7 @@ Open http://localhost:3000
 ## Python Environment Selection
 
 The toolbar includes a Python environment selector dropdown. Select the conda environment that has gdsfactory installed (e.g., the `gds` environment) to enable provenance tracking when running scripts.
+
+## References
+
+- Overleaf: https://github.com/overleaf/overleaf
