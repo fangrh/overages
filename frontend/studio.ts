@@ -126,7 +126,6 @@ const rebuildBtn = document.getElementById('rebuild-btn') as HTMLButtonElement;
 const monacoContainer = document.getElementById('monaco-editor')!;
 const iframeViewer = document.getElementById('gds-viewer') as HTMLIFrameElement;
 const terminalBody = document.getElementById('terminal-body')!;
-const clearBtn = document.getElementById('clear-terminal') as HTMLButtonElement;
 const fileTree = document.getElementById('file-tree')!;
 const sidebar = document.getElementById('sidebar')!;
 const currentFileLabel = document.getElementById('current-file')!;
@@ -705,7 +704,6 @@ export function init() {
   folderInput.addEventListener('change', handleFolderOpen);
   runBtn.addEventListener('click', handleRun);
   rebuildBtn.addEventListener('click', handleRebuild);
-  clearBtn.addEventListener('click', () => terminal.clear());
 
   // Expose studio for debugging
   (window as any).studio = { editor, bridge, terminal };
@@ -715,6 +713,9 @@ export function init() {
 
   // Load Python environments
   loadPythonEnvironments();
+
+  // Initialize terminal settings
+  initSettings();
 
   // Restore layout mode from sessionStorage
   const savedLayout = sessionStorage.getItem('supergds-layout') as LayoutMode | null;
@@ -811,6 +812,49 @@ async function restoreWorkspace() {
     }
   } catch {
     // No persisted workspace — user will open one manually
+  }
+}
+
+// Terminal settings
+type SourceInfoMode = 'off' | 'auto' | 'clipboard';
+let sourceInfoMode: SourceInfoMode = 'off';
+
+function initSettings() {
+  const settingsBtn = document.getElementById('terminal-settings');
+  const dropdown = document.getElementById('terminal-settings-dropdown');
+
+  if (!settingsBtn || !dropdown) return;
+
+  settingsBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    dropdown.classList.toggle('hidden');
+  });
+
+  document.addEventListener('click', () => {
+    dropdown.classList.add('hidden');
+  });
+
+  dropdown.querySelectorAll('.terminal-settings-option').forEach(el => {
+    el.addEventListener('click', () => {
+      const mode = el.getAttribute('data-mode') as SourceInfoMode;
+      sourceInfoMode = mode;
+      // Update active states
+      dropdown.querySelectorAll('.terminal-settings-option').forEach(opt => {
+        opt.classList.toggle('active', opt.getAttribute('data-mode') === mode);
+      });
+      dropdown.classList.add('hidden');
+      // Persist preference
+      localStorage.setItem('supergds-source-info', mode);
+    });
+  });
+
+  // Load saved preference
+  const saved = localStorage.getItem('supergds-source-info') as SourceInfoMode | null;
+  if (saved) {
+    sourceInfoMode = saved;
+    dropdown.querySelectorAll('.terminal-settings-option').forEach(opt => {
+      opt.classList.toggle('active', opt.getAttribute('data-mode') === saved);
+    });
   }
 }
 

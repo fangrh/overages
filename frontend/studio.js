@@ -86,7 +86,6 @@
   var monacoContainer = document.getElementById("monaco-editor");
   var iframeViewer = document.getElementById("gds-viewer");
   var terminalBody = document.getElementById("terminal-body");
-  var clearBtn = document.getElementById("clear-terminal");
   var fileTree = document.getElementById("file-tree");
   var sidebar = document.getElementById("sidebar");
   var currentFileLabel = document.getElementById("current-file");
@@ -526,10 +525,10 @@
     folderInput.addEventListener("change", handleFolderOpen);
     runBtn.addEventListener("click", handleRun);
     rebuildBtn.addEventListener("click", handleRebuild);
-    clearBtn.addEventListener("click", () => terminal.clear());
     window.studio = { editor, bridge, terminal };
     restoreWorkspace();
     loadPythonEnvironments();
+    initSettings();
     const savedLayout = sessionStorage.getItem("supergds-layout");
     setLayoutMode(savedLayout || "split");
     if (layoutBtn) {
@@ -608,6 +607,37 @@
         await openWorkspace(data.workspace);
       }
     } catch {
+    }
+  }
+  var sourceInfoMode = "off";
+  function initSettings() {
+    const settingsBtn = document.getElementById("terminal-settings");
+    const dropdown = document.getElementById("terminal-settings-dropdown");
+    if (!settingsBtn || !dropdown) return;
+    settingsBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      dropdown.classList.toggle("hidden");
+    });
+    document.addEventListener("click", () => {
+      dropdown.classList.add("hidden");
+    });
+    dropdown.querySelectorAll(".terminal-settings-option").forEach((el) => {
+      el.addEventListener("click", () => {
+        const mode = el.getAttribute("data-mode");
+        sourceInfoMode = mode;
+        dropdown.querySelectorAll(".terminal-settings-option").forEach((opt) => {
+          opt.classList.toggle("active", opt.getAttribute("data-mode") === mode);
+        });
+        dropdown.classList.add("hidden");
+        localStorage.setItem("supergds-source-info", mode);
+      });
+    });
+    const saved = localStorage.getItem("supergds-source-info");
+    if (saved) {
+      sourceInfoMode = saved;
+      dropdown.querySelectorAll(".terminal-settings-option").forEach((opt) => {
+        opt.classList.toggle("active", opt.getAttribute("data-mode") === saved);
+      });
     }
   }
   init();
