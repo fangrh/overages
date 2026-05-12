@@ -107,7 +107,18 @@
       <div id="terminal-header">
         <span>Terminal</span>
         <div style="flex: 1;"></div>
-        <button id="clear-terminal">clear</button>
+        <span id="terminal-settings" class="terminal-settings-btn" title="Terminal Settings">⚙</span>
+        <div id="terminal-settings-dropdown" class="hidden">
+          <div class="terminal-settings-option" data-mode="off">
+            <span class="check">○</span> Off
+          </div>
+          <div class="terminal-settings-option" data-mode="auto">
+            <span class="check">○</span> Auto
+          </div>
+          <div class="terminal-settings-option" data-mode="clipboard">
+            <span class="check">○</span> Clipboard
+          </div>
+        </div>
       </div>
       <div id="terminal-body"></div>
     </div>
