@@ -59,12 +59,9 @@ class ResizeHandle {
       e.stopPropagation();
     });
 
-    // Use window-level listeners to catch all pointermove events during capture
-    window.addEventListener('pointermove', (e) => {
-      if (!this.dragging) {
-        console.log('[drag] pointermove but not dragging');
-        return;
-      }
+    // With pointer capture, events route directly to the handle element
+    this.handle.addEventListener('pointermove', (e) => {
+      if (!this.dragging) return;
       const dx = e.clientX - this.startX;
       const newWidth = this.startEditorWidth + dx;
       const containerWidth = this.editorPane.parentElement!.getBoundingClientRect().width;
@@ -78,18 +75,16 @@ class ResizeHandle {
       this.viewerPane.style.flex = 'none';
       this.viewerPane.style.width = `${remainingWidth}px`;
       this.handle.style.left = `${clamped}px`;
-      console.log(`[drag] dx=${dx} newWidth=${newWidth} clamped=${clamped} remaining=${remainingWidth}`);
       // Force iframe to recalculate its content size by triggering a reflow
       const iframe = document.getElementById('gds-viewer') as HTMLIFrameElement;
       if (iframe) {
-        // Toggle width to force reflow
         iframe.style.width = '99%';
         void iframe.offsetWidth;
         iframe.style.width = '';
       }
-    }, true);
+    });
 
-    window.addEventListener('pointerup', (e) => {
+    this.handle.addEventListener('pointerup', (e) => {
       if (!this.dragging) return;
       this.dragging = false;
       this.handle.classList.remove('dragging');
@@ -103,7 +98,7 @@ class ResizeHandle {
       // Notify viewer iframe to update its map size
       const iframe = document.getElementById('gds-viewer') as HTMLIFrameElement;
       iframe?.contentWindow?.postMessage({ type: 'resize' }, '*');
-    }, true);
+    });
 
     this.handle.addEventListener('pointercancel', (e) => {
       if (!this.dragging) return;

@@ -21,41 +21,56 @@
       this.updateHandlePosition();
     }
     setupEvents() {
-      this.handle.addEventListener("mousedown", (e) => {
+      this.handle.addEventListener("pointerdown", (e) => {
         this.dragging = true;
         this.startX = e.clientX;
         this.startEditorWidth = this.editorPane.getBoundingClientRect().width;
         this.handle.classList.add("dragging");
         this.editorPane.parentElement.classList.add("no-transition");
+        this.handle.setPointerCapture(e.pointerId);
         e.preventDefault();
         e.stopPropagation();
       });
-      window.addEventListener("mousemove", (e) => {
+      this.handle.addEventListener("pointermove", (e) => {
         if (!this.dragging) return;
         const dx = e.clientX - this.startX;
         const newWidth = this.startEditorWidth + dx;
         const containerWidth = this.editorPane.parentElement.getBoundingClientRect().width;
         const minWidth = 200;
-        const maxWidth = containerWidth - minWidth - 5;
-        const clamped = Math.max(minWidth, Math.min(maxWidth, newWidth));
         const handleWidth = 5;
+        const clamped = Math.max(minWidth, Math.min(containerWidth - minWidth - handleWidth, newWidth));
         const remainingWidth = containerWidth - clamped - handleWidth;
         this.editorPane.style.flex = "none";
         this.editorPane.style.width = `${clamped}px`;
         this.viewerPane.style.flex = "none";
         this.viewerPane.style.width = `${remainingWidth}px`;
         this.handle.style.left = `${clamped}px`;
-      }, true);
-      window.addEventListener("mouseup", () => {
-        if (this.dragging) {
-          this.dragging = false;
-          this.handle.classList.remove("dragging");
-          this.editorPane.parentElement.classList.remove("no-transition");
-          const remainingWidth = this.viewerPane.parentElement.getBoundingClientRect().width - parseFloat(this.handle.style.left || "0");
-          this.viewerPane.style.flex = "none";
-          this.viewerPane.style.width = `${remainingWidth}px`;
+        const iframe = document.getElementById("gds-viewer");
+        if (iframe) {
+          iframe.style.width = "99%";
+          void iframe.offsetWidth;
+          iframe.style.width = "";
         }
-      }, true);
+      });
+      this.handle.addEventListener("pointerup", (e) => {
+        if (!this.dragging) return;
+        this.dragging = false;
+        this.handle.classList.remove("dragging");
+        this.editorPane.parentElement.classList.remove("no-transition");
+        const remainingWidth = this.viewerPane.parentElement.getBoundingClientRect().width - parseFloat(this.handle.style.left || "0");
+        this.viewerPane.style.flex = "none";
+        this.viewerPane.style.width = `${remainingWidth}px`;
+        this.handle.releasePointerCapture(e.pointerId);
+        const iframe = document.getElementById("gds-viewer");
+        iframe?.contentWindow?.postMessage({ type: "resize" }, "*");
+      });
+      this.handle.addEventListener("pointercancel", (e) => {
+        if (!this.dragging) return;
+        this.dragging = false;
+        this.handle.classList.remove("dragging");
+        this.editorPane.parentElement.classList.remove("no-transition");
+        this.handle.releasePointerCapture(e.pointerId);
+      });
     }
     isDragging() {
       return this.dragging;
@@ -77,6 +92,7 @@
   var currentFileLabel = document.getElementById("current-file");
   var menuFile = document.getElementById("menu-file");
   var menuOpenFolder = document.getElementById("menu-open-folder");
+  var pythonEnvSelect = document.getElementById("python-env-select");
   var editorTab = document.getElementById("editor-tab");
   var viewerTab = document.getElementById("viewer-tab");
   var viewerTabClose = document.getElementById("viewer-tab-close");
@@ -405,6 +421,30 @@
     terminal.addLine("system", `Opened folder: ${dirHandle.name}`);
     await loadFileTree();
   }
+  async function loadPythonEnvironments() {
+    if (!pythonEnvSelect) return;
+    try {
+      const res = await fetch("/api/python-environments");
+      if (!res.ok) {
+        console.error("Failed to load Python environments:", res.status);
+        return;
+      }
+      const { environments } = await res.json();
+      pythonEnvSelect.innerHTML = "";
+      for (const env of environments) {
+        const option = document.createElement("option");
+        option.value = env.path;
+        option.textContent = env.name;
+        option.title = env.path;
+        if (env.isActive) {
+          option.selected = true;
+        }
+        pythonEnvSelect.appendChild(option);
+      }
+    } catch (err) {
+      console.error("Error loading Python environments:", err);
+    }
+  }
   async function loadFileTree() {
     const res = await fetch("/api/files");
     if (!res.ok) {
@@ -444,9 +484,11 @@
     if (!currentFile) return;
     await saveCurrentFile();
     terminal.clear();
+    const pythonPath = pythonEnvSelect?.value;
+    const pythonPathParam = pythonPath ? `&pythonPath=${encodeURIComponent(pythonPath)}` : "";
     terminal.addLine("system", `$ python ${currentFile}`);
     let completed = false;
-    const es = new EventSource(`/api/run?pythonFile=${encodeURIComponent(currentFile)}`);
+    const es = new EventSource(`/api/run?pythonFile=${encodeURIComponent(currentFile)}${pythonPathParam}`);
     es.addEventListener("start", (e) => terminal.addLine("stdout", JSON.parse(e.data).status));
     es.addEventListener("stdout", (e) => terminal.addLine("stdout", JSON.parse(e.data).line));
     es.addEventListener("stderr", (e) => terminal.addLine("stderr", JSON.parse(e.data).line));
@@ -487,6 +529,7 @@
     clearBtn.addEventListener("click", () => terminal.clear());
     window.studio = { editor, bridge, terminal };
     restoreWorkspace();
+    loadPythonEnvironments();
     const savedLayout = sessionStorage.getItem("supergds-layout");
     setLayoutMode(savedLayout || "split");
     if (layoutBtn) {
@@ -569,3 +612,4 @@
   }
   init();
 })();
+//# sourceMappingURL=studio.js.map
