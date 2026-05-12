@@ -693,6 +693,7 @@ export function init() {
   editor = (window as any).setupMonaco(monacoContainer);
   // @ts-ignore
   terminal = new (window as any).TerminalRenderer(terminalBody);
+  terminal.sourceInfoMode = sourceInfoMode;
   // @ts-ignore
   bridge = new (window as any).IframeBridge(iframeViewer);
 
