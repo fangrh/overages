@@ -106,6 +106,10 @@
     <div id="terminal">
       <div id="terminal-header">
         <span>Terminal</span>
+        <span style="display:flex;align-items:center;gap:2px;margin-left:12px;">
+          <span class="terminal-tab-btn active" data-tab="source" id="terminal-tab-source">Source</span>
+          <span class="terminal-tab-btn" data-tab="info" id="terminal-tab-info">Info</span>
+        </span>
         <div style="flex: 1;"></div>
         <span id="terminal-settings" class="terminal-settings-btn" title="Terminal Settings">⚙</span>
         <div id="terminal-settings-dropdown" class="hidden">
@@ -120,7 +124,10 @@
           </div>
         </div>
       </div>
-      <div id="terminal-body"></div>
+      <div id="terminal-body">
+        <div id="terminal-source-panel" class="terminal-tab-panel active"><p class="placeholder">Click a polygon in the viewer to inspect source</p></div>
+        <div id="terminal-info-panel" class="terminal-tab-panel" style="display:none;"><p class="placeholder">Click a polygon in the viewer to inspect</p></div>
+      </div>
     </div>
   </div>
 </div>

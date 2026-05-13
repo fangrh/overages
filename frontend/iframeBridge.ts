@@ -52,6 +52,7 @@ export class IframeBridge {
         break;
       case 'selectComponents':
         this.forwardToEditor(msg.components);
+        this.updateTerminalPanels(msg.components);
         break;
       case 'askClaude':
         this.handleAskClaude(msg.components, msg.question);
@@ -115,6 +116,81 @@ export class IframeBridge {
 
   private handleAskClaude(components: ComponentSelection[], question: string): void {
     console.log('askClaude', components, question);
+  }
+
+  private updateTerminalPanels(components: ComponentSelection[]): void {
+    // Update terminal source-panel and info-panel with component data
+    const sourcePanel = document.getElementById('terminal-source-panel');
+    const infoPanel = document.getElementById('terminal-info-panel');
+    if (!sourcePanel || !infoPanel) return;
+
+    if (components.length === 0) {
+      sourcePanel.innerHTML = '<p class="placeholder">Click a polygon in the viewer to inspect source</p>';
+      infoPanel.innerHTML = '<p class="placeholder">Click a polygon in the viewer to inspect</p>';
+      return;
+    }
+
+    // Info panel: show key-value info for first component
+    const comp = components[0];
+    const prov = comp.provenance || {};
+    infoPanel.innerHTML = '';
+
+    const addKV = (key: string, val: string) => {
+      const row = document.createElement('div');
+      row.className = 'kv';
+      row.innerHTML = `<span class="key">${key}</span><span class="val">${val}</span>`;
+      infoPanel.appendChild(row);
+    };
+
+    addKV('layer', comp.layer || '?');
+    if (prov.instance_name) addKV('instance', prov.instance_name);
+    if (prov.cell) addKV('cell', prov.cell);
+    if (prov.file) {
+      let fileLabel = prov.file + ':' + (prov.line ?? '?');
+      if (prov.array_index?.length) fileLabel += ` (array index [${prov.array_index.join(', ')}])`;
+      if (prov.loop_index?.length) fileLabel += ` (loop index [${prov.loop_index.join(', ')}])`;
+      addKV('file', fileLabel);
+    }
+    if (prov.function && prov.function !== '<module>') addKV('function', prov.function + '()');
+    if (prov.class_name) addKV('class', prov.class_name);
+
+    // Source panel: show source locations
+    if (prov.file) {
+      sourcePanel.innerHTML = '';
+      const files = new Map<string, { line: number; loop_index?: number[]; array_index?: number[] }[]>();
+      const fp = prov.file.replace(/\\/g, '/');
+      const entry: { line: number; loop_index?: number[]; array_index?: number[] } = { line: typeof prov.line === 'number' ? prov.line : parseInt(String(prov.line)) || 0 };
+      if (prov.loop_index) entry.loop_index = prov.loop_index;
+      if (prov.array_index) entry.array_index = prov.array_index;
+      files.set(fp, [entry]);
+
+      // Add call chain files
+      const chain = prov.call_chain || [];
+      for (const cc of chain) {
+        if (cc.file) {
+          const cfp = cc.file.replace(/\\/g, '/');
+          const cl = typeof cc.line === 'number' ? cc.line : parseInt(String(cc.line)) || 0;
+          if (!files.has(cfp)) files.set(cfp, []);
+          const existing = files.get(cfp)!;
+          if (!existing.some(e => e.line === cl)) existing.push({ line: cl });
+        }
+      }
+
+      // Render file entries
+      for (const [file, entries] of files) {
+        for (const entry of entries) {
+          const div = document.createElement('div');
+          div.className = 'kv';
+          let label = `@${file}:${entry.line}`;
+          if (entry.loop_index) label += ` (loop [${entry.loop_index.join(', ')}])`;
+          if (entry.array_index) label += ` (array [${entry.array_index.join(', ')}])`;
+          div.innerHTML = `<span class="key">source</span><span class="val">${label}</span>`;
+          sourcePanel.appendChild(div);
+        }
+      }
+    } else {
+      sourcePanel.innerHTML = '<p class="placeholder">No provenance data in this GDS file.</p>';
+    }
   }
 }
 

@@ -668,6 +668,26 @@ async function handleRun() {
     completed = true;
     const data = JSON.parse(e.data);
     bridge.sendLoadGds(data);
+    // Extract source locations from geojson and display in terminal
+    const geojson = data.geojson as { features?: Array<{ properties?: { provenance?: { file?: string; line?: number | string } } }> };
+    if (geojson?.features) {
+      const sources = new Map<string, { file: string; line: number }>();
+      for (const f of geojson.features) {
+        const prov = f.properties?.provenance;
+        if (prov?.file && prov?.line) {
+          const lineNum = typeof prov.line === 'number' ? prov.line : parseInt(String(prov.line), 10);
+          if (!isNaN(lineNum)) {
+            sources.set(`${prov.file}:${lineNum}`, { file: prov.file, line: lineNum });
+          }
+        }
+      }
+      if (sources.size > 0) {
+        terminal.addLine('system', `Found ${sources.size} component(s) with source info:`);
+        for (const [key, src] of sources) {
+          terminal.addLine('stdout', `  ${src.file}:${src.line}`, { file: src.file, line: src.line });
+        }
+      }
+    }
     terminal.addLine('system', 'Done.');
     es.close();
   });
@@ -846,6 +866,23 @@ function initSettings() {
       dropdown.classList.add('hidden');
       // Persist preference
       localStorage.setItem('supergds-source-info', mode);
+    });
+  });
+
+  // Terminal tab switching
+  document.querySelectorAll('.terminal-tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.getAttribute('data-tab');
+      if (!tab) return;
+      // Update tab active states
+      document.querySelectorAll('.terminal-tab-btn').forEach(b => {
+        b.classList.toggle('active', b.getAttribute('data-tab') === tab);
+      });
+      // Toggle panel visibility
+      const sourcePanel = document.getElementById('terminal-source-panel');
+      const infoPanel = document.getElementById('terminal-info-panel');
+      if (sourcePanel) sourcePanel.style.display = tab === 'source' ? '' : 'none';
+      if (infoPanel) infoPanel.style.display = tab === 'info' ? '' : 'none';
     });
   });
 
