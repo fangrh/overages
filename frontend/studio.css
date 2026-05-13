@@ -714,3 +714,13 @@ body {
 ::-webkit-scrollbar-track { background: #1a1a2e; }
 ::-webkit-scrollbar-thumb { background: #313244; border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: #45475a; }
+
+/* Clickable source jump entries */
+.source-jump {
+  cursor: pointer;
+  color: #89b4fa !important;
+  text-decoration: underline;
+}
+.source-jump:hover {
+  color: #cba6f7 !important;
+}

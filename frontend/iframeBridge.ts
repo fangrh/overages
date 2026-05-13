@@ -187,7 +187,13 @@ export class IframeBridge {
           let label = `@${file}:${entry.line}`;
           if (entry.loop_index) label += ` (loop [${entry.loop_index.join(', ')}])`;
           if (entry.array_index) label += ` (array [${entry.array_index.join(', ')}])`;
-          div.innerHTML = `<span class="key">source</span><span class="val">${label}</span>`;
+          const sourceSpan = document.createElement('span');
+          sourceSpan.className = 'val clickable source-jump';
+          sourceSpan.setAttribute('data-file', file);
+          sourceSpan.setAttribute('data-line', String(entry.line));
+          sourceSpan.textContent = label;
+          div.innerHTML = '<span class="key">source</span>';
+          div.appendChild(sourceSpan);
           sourcePanel.appendChild(div);
         }
       }
