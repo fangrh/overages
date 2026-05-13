@@ -57,6 +57,9 @@ export class IframeBridge {
       case 'askClaude':
         this.handleAskClaude(msg.components, msg.question);
         break;
+      case 'jumpToSource':
+        this.jumpToSourceInEditor(msg.file, msg.line);
+        break;
     }
   }
 
@@ -191,6 +194,28 @@ export class IframeBridge {
     } else {
       sourcePanel.innerHTML = '<p class="placeholder">No provenance data in this GDS file.</p>';
     }
+  }
+
+  private jumpToSourceInEditor(file: string, line: number): void {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const studio = (window as any).studio;
+    if (!studio?.editor) return;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const editor = studio.editor as any;
+    const model = editor.getModel?.();
+    if (!model) return;
+
+    // Check if target file is currently open in editor
+    const currentUri = model.uri?.toString() ?? '';
+    const targetUri = `file:///${file.replace(/\\/g, '/')}`;
+    if (currentUri !== targetUri) {
+      // Target file not open — just reveal line in current editor (user can navigate manually)
+      editor.revealLine?.(line, 0 /* SmoothScroll */);
+      return;
+    }
+
+    editor.revealLine?.(line, 0 /* SmoothScroll */);
   }
 }
 
