@@ -903,9 +903,8 @@ function initSettings() {
     const line = target.getAttribute('data-line');
     if (!file || !line) return;
 
-    // Forward to iframeBridge via postMessage
-    const iframe = document.getElementById('gds-viewer') as HTMLIFrameElement;
-    iframe?.contentWindow?.postMessage({ type: 'jumpToSource', file, line: parseInt(line, 10) }, '*');
+    // Forward to iframeBridge via postMessage on the parent window (iframeBridge listens here)
+    window.postMessage({ type: 'jumpToSource', file, line: parseInt(line, 10) }, '*');
   });
 }
 
