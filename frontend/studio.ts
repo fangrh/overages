@@ -894,6 +894,19 @@ function initSettings() {
       opt.classList.toggle('active', opt.getAttribute('data-mode') === saved);
     });
   }
+
+  // Source jump click handler — forward to iframeBridge which calls Monaco
+  document.getElementById('terminal-source-panel')?.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement;
+    if (!target.classList.contains('source-jump')) return;
+    const file = target.getAttribute('data-file');
+    const line = target.getAttribute('data-line');
+    if (!file || !line) return;
+
+    // Forward to iframeBridge via postMessage
+    const iframe = document.getElementById('gds-viewer') as HTMLIFrameElement;
+    iframe?.contentWindow?.postMessage({ type: 'jumpToSource', file, line: parseInt(line, 10) }, '*');
+  });
 }
 
 init();
