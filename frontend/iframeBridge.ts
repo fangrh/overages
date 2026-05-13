@@ -212,16 +212,32 @@ export class IframeBridge {
     const model = editor.getModel?.();
     if (!model) return;
 
-    // Check if target file is currently open in editor
     const currentUri = model.uri?.toString() ?? '';
     const targetUri = `file:///${file.replace(/\\/g, '/')}`;
-    if (currentUri !== targetUri) {
-      // Target file not open — just reveal line in current editor (user can navigate manually)
+    if (currentUri === targetUri) {
+      // Same file — just reveal
       editor.revealLine?.(line, 0 /* SmoothScroll */);
       return;
     }
 
-    editor.revealLine?.(line, 0 /* SmoothScroll */);
+    // Target file not open — try to open it via workspace file reading
+    // studio may have a way to open files from workspace path
+    if (typeof studio.openFile === 'function') {
+      studio.openFile(file);
+      // After opening, set a timeout to reveal the line once model loads
+      const timeout = setTimeout(() => {
+        const newModel = editor.getModel?.();
+        if (newModel?.uri?.toString() === targetUri) {
+          editor.revealLine?.(line, 0);
+        }
+        clearTimeout(timeout);
+      }, 200);
+      return;
+    }
+
+    // No openFile — fallback to revealing current line (user navigates manually)
+    console.warn('jumpToSource: target file not open and no openFile method', file);
+    editor.revealLine?.(line, 0);
   }
 }
 
