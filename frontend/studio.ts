@@ -904,6 +904,7 @@ function initSettings() {
     if (!file || !line) return;
 
     // Forward to iframeBridge via postMessage on the parent window (iframeBridge listens here)
+    console.log('[studio] jumpToSource click:', file, line);
     window.postMessage({ type: 'jumpToSource', file, line: parseInt(line, 10) }, '*');
   });
 }

@@ -41,6 +41,7 @@ export class IframeBridge {
   private onMessage(e: MessageEvent): void {
     const msg = e.data;
     if (!msg || typeof msg !== 'object') return;
+    console.log('[iframeBridge] message received:', msg.type, msg);
     switch (msg.type) {
       case 'webviewReady':
         this.ready = true;
@@ -58,6 +59,7 @@ export class IframeBridge {
         this.handleAskClaude(msg.components, msg.question);
         break;
       case 'jumpToSource':
+        console.log('[iframeBridge] received jumpToSource:', msg.file, msg.line);
         this.jumpToSourceInEditor(msg.file, msg.line);
         break;
     }
@@ -203,9 +205,13 @@ export class IframeBridge {
   }
 
   private jumpToSourceInEditor(file: string, line: number): void {
+    console.log('[iframeBridge] jumpToSourceInEditor called:', file, line);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const studio = (window as any).studio;
-    if (!studio?.editor) return;
+    if (!studio?.editor) {
+      console.log('[iframeBridge] studio.editor not available');
+      return;
+    }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const editor = studio.editor as any;

@@ -21,6 +21,7 @@
     onMessage(e) {
       const msg = e.data;
       if (!msg || typeof msg !== "object") return;
+      console.log("[iframeBridge] message received:", msg.type, msg);
       switch (msg.type) {
         case "webviewReady":
           this.ready = true;
@@ -37,6 +38,7 @@
           this.handleAskClaude(msg.components, msg.question);
           break;
         case "jumpToSource":
+          console.log("[iframeBridge] received jumpToSource:", msg.file, msg.line);
           this.jumpToSourceInEditor(msg.file, msg.line);
           break;
       }
@@ -148,8 +150,12 @@
       }
     }
     jumpToSourceInEditor(file, line) {
+      console.log("[iframeBridge] jumpToSourceInEditor called:", file, line);
       const studio = window.studio;
-      if (!studio?.editor) return;
+      if (!studio?.editor) {
+        console.log("[iframeBridge] studio.editor not available");
+        return;
+      }
       const editor = studio.editor;
       const model = editor.getModel?.();
       if (!model) return;
