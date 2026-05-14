@@ -52,7 +52,7 @@ export class IframeBridge {
         this.pending = [];
         break;
       case 'selectComponents':
-        this.forwardToEditor(msg.components);
+        // forwardToEditor is for VS Code mode (Monaco decorations) - skip in standalone mode
         this.updateTerminalPanels(msg.components);
         break;
       case 'askClaude':

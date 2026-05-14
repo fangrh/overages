@@ -31,7 +31,6 @@
           this.pending = [];
           break;
         case "selectComponents":
-          this.forwardToEditor(msg.components);
           this.updateTerminalPanels(msg.components);
           break;
         case "askClaude":
