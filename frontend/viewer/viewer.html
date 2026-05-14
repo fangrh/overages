@@ -429,11 +429,16 @@ function onSelectionChanged() {
 
 function postSelectedComponents(features) {
     var mode = document.getElementById('claude-mode').value;
-    vscode && vscode.postMessage({
+    var msg = {
         type: 'selectComponents',
         components: componentsFromFeatures(features),
         claudeMode: mode
-    });
+    };
+    if (vscode) {
+        vscode.postMessage(msg);
+    } else if (window.parent !== window) {
+        window.parent.postMessage(msg, '*');
+    }
 }
 
 function componentsFromFeatures(features) {
@@ -626,7 +631,9 @@ function updateMultiSourcePanel(fileMap, features) {
             primaryDiv.className = 'kv';
             primaryDiv.innerHTML = '<span class="key">Selected #' + (idx + 1) + '</span><span class="val hl" style="cursor:pointer;">@' + esc(compFile + '#' + compLine + indexLabel) + '</span>';
             primaryDiv.querySelector('.val').addEventListener('click', function() {
-                vscode && vscode.postMessage({ type: 'requestSource', file: compFile, line: compLine });
+                var msg = { type: 'requestSource', file: compFile, line: compLine };
+                if (vscode) vscode.postMessage(msg);
+                else if (window.parent !== window) window.parent.postMessage(msg, '*');
             });
             panel.appendChild(primaryDiv);
 
@@ -640,7 +647,9 @@ function updateMultiSourcePanel(fileMap, features) {
                 chainDiv.className = 'kv';
                 chainDiv.innerHTML = '<span class="key" style="color:#585b70;">&nbsp;&nbsp;&larr;</span><span class="val" style="cursor:pointer;color:#6c7086;">@' + esc(cfp + '#' + chainLine) + '</span>';
                 chainDiv.querySelector('.val').addEventListener('click', function() {
-                    vscode && vscode.postMessage({ type: 'requestSource', file: cfp, line: cc.line });
+                    var msg = { type: 'requestSource', file: cfp, line: cc.line };
+                    if (vscode) vscode.postMessage(msg);
+                    else if (window.parent !== window) window.parent.postMessage(msg, '*');
                 });
                 panel.appendChild(chainDiv);
             });
@@ -701,7 +710,9 @@ function renderSourceLinks(filePath, entries, container, primaryFile) {
             + '<span class="fn">' + loopStr + 'Open source</span>';
         btn.onclick = function(e) {
             e.stopPropagation();
-            vscode && vscode.postMessage({ type: 'requestSource', file: filePath, line: entry.line });
+            var msg = { type: 'requestSource', file: filePath, line: entry.line };
+            if (vscode) vscode.postMessage(msg);
+            else if (window.parent !== window) window.parent.postMessage(msg, '*');
         };
         container.appendChild(btn);
     });
