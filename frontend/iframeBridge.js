@@ -158,30 +158,34 @@
       }
       const editor = studio.editor;
       const model = editor.getModel?.();
-      if (!model) return;
+      if (!model) {
+        console.log("[iframeBridge] no model in editor");
+        return;
+      }
       const currentUri = model.uri?.toString() ?? "";
       const targetUri = `file:///${file.replace(/\\/g, "/")}`;
-      if (currentUri === targetUri) {
-        editor.revealLine?.(
-          line,
-          0
-          /* SmoothScroll */
-        );
+      console.log("[iframeBridge] currentUri:", currentUri, "targetUri:", targetUri);
+      if (currentUri !== targetUri) {
+        console.log("[iframeBridge] target file not open in editor \u2014 doing nothing");
         return;
       }
-      if (typeof studio.openFile === "function") {
-        studio.openFile(file);
-        const timeout = setTimeout(() => {
-          const newModel = editor.getModel?.();
-          if (newModel?.uri?.toString() === targetUri) {
-            editor.revealLine?.(line, 0);
+      console.log("[iframeBridge] file is open, revealing line and highlighting");
+      editor.revealLine?.(
+        line,
+        0
+        /* SmoothScroll */
+      );
+      const monacoObj = window.monaco;
+      if (monacoObj && model) {
+        editor.deltaDecorations?.([], [{
+          range: new monacoObj.Range(line, 1, line, model.getLineMaxLength(line)),
+          options: {
+            isWholeLine: true,
+            className: "source-highlight",
+            glyphMarginClassName: "source-glyph"
           }
-          clearTimeout(timeout);
-        }, 200);
-        return;
+        }]);
       }
-      console.warn("jumpToSource: target file not open and no openFile method", file);
-      editor.revealLine?.(line, 0);
     }
   };
   window.IframeBridge = IframeBridge;

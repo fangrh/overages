@@ -205,46 +205,49 @@ export class IframeBridge {
   }
 
   private jumpToSourceInEditor(file: string, line: number): void {
-    console.log('[iframeBridge] jumpToSourceInEditor called:', file, line);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const studio = (window as any).studio;
-    if (!studio?.editor) {
-      console.log('[iframeBridge] studio.editor not available');
-      return;
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const editor = studio.editor as any;
-    const model = editor.getModel?.();
-    if (!model) return;
-
-    const currentUri = model.uri?.toString() ?? '';
-    const targetUri = `file:///${file.replace(/\\/g, '/')}`;
-    if (currentUri === targetUri) {
-      // Same file — just reveal
-      editor.revealLine?.(line, 0 /* SmoothScroll */);
-      return;
-    }
-
-    // Target file not open — try to open it via workspace file reading
-    // studio may have a way to open files from workspace path
-    if (typeof studio.openFile === 'function') {
-      studio.openFile(file);
-      // After opening, set a timeout to reveal the line once model loads
-      const timeout = setTimeout(() => {
-        const newModel = editor.getModel?.();
-        if (newModel?.uri?.toString() === targetUri) {
-          editor.revealLine?.(line, 0);
-        }
-        clearTimeout(timeout);
-      }, 200);
-      return;
-    }
-
-    // No openFile — fallback to revealing current line (user navigates manually)
-    console.warn('jumpToSource: target file not open and no openFile method', file);
-    editor.revealLine?.(line, 0);
+  console.log('[iframeBridge] jumpToSourceInEditor called:', file, line);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const studio = (window as any).studio;
+  if (!studio?.editor) {
+    console.log('[iframeBridge] studio.editor not available');
+    return;
   }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const editor = studio.editor as any;
+  const model = editor.getModel?.();
+  if (!model) {
+    console.log('[iframeBridge] no model in editor');
+    return;
+  }
+
+  const currentUri = model.uri?.toString() ?? '';
+  const targetUri = `file:///${file.replace(/\\/g, '/')}`;
+  console.log('[iframeBridge] currentUri:', currentUri, 'targetUri:', targetUri);
+
+  if (currentUri !== targetUri) {
+    console.log('[iframeBridge] target file not open in editor — doing nothing');
+    return;
+  }
+
+  // File is open — reveal line and highlight it
+  console.log('[iframeBridge] file is open, revealing line and highlighting');
+  editor.revealLine?.(line, 0 /* SmoothScroll */);
+
+  // Re-apply highlight decoration on this line
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const monacoObj = (window as any).monaco;
+  if (monacoObj && model) {
+    editor.deltaDecorations?.([], [{
+      range: new monacoObj.Range(line, 1, line, model.getLineMaxLength(line)),
+      options: {
+        isWholeLine: true,
+        className: 'source-highlight',
+        glyphMarginClassName: 'source-glyph',
+      },
+    }]);
+  }
+}
 }
 
 // Expose globally for IIFE bundling
