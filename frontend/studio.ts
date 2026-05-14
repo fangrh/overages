@@ -377,6 +377,9 @@ async function openFile(filePath: string) {
   const { content } = await res.json();
   editor.setValue(content);
 
+  // Track current file for jump-to-source
+  (window as any).studio.currentFile = filePath;
+
   runBtn.disabled = false;
   rebuildBtn.disabled = false;
 }
@@ -727,7 +730,7 @@ export function init() {
   rebuildBtn.addEventListener('click', handleRebuild);
 
   // Expose studio for debugging
-  (window as any).studio = { editor, bridge, terminal };
+  (window as any).studio = { editor, bridge, terminal, currentFile: null };
 
   // Restore workspace from server-persisted state
   restoreWorkspace();

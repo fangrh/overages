@@ -283,6 +283,7 @@
     }
     const { content } = await res.json();
     editor.setValue(content);
+    window.studio.currentFile = filePath;
     runBtn.disabled = false;
     rebuildBtn.disabled = false;
   }
@@ -495,6 +496,25 @@
       completed = true;
       const data = JSON.parse(e.data);
       bridge.sendLoadGds(data);
+      const geojson = data.geojson;
+      if (geojson?.features) {
+        const sources = /* @__PURE__ */ new Map();
+        for (const f of geojson.features) {
+          const prov = f.properties?.provenance;
+          if (prov?.file && prov?.line) {
+            const lineNum = typeof prov.line === "number" ? prov.line : parseInt(String(prov.line), 10);
+            if (!isNaN(lineNum)) {
+              sources.set(`${prov.file}:${lineNum}`, { file: prov.file, line: lineNum });
+            }
+          }
+        }
+        if (sources.size > 0) {
+          terminal.addLine("system", `Found ${sources.size} component(s) with source info:`);
+          for (const [key, src] of sources) {
+            terminal.addLine("stdout", `  ${src.file}:${src.line}`, { file: src.file, line: src.line });
+          }
+        }
+      }
       terminal.addLine("system", "Done.");
       es.close();
     });
@@ -519,13 +539,14 @@
   function init() {
     editor = window.setupMonaco(monacoContainer);
     terminal = new window.TerminalRenderer(terminalBody);
+    terminal.sourceInfoMode = sourceInfoMode;
     bridge = new window.IframeBridge(iframeViewer);
     setupMenuBar();
     setupSidebar();
     folderInput.addEventListener("change", handleFolderOpen);
     runBtn.addEventListener("click", handleRun);
     rebuildBtn.addEventListener("click", handleRebuild);
-    window.studio = { editor, bridge, terminal };
+    window.studio = { editor, bridge, terminal, currentFile: null };
     restoreWorkspace();
     loadPythonEnvironments();
     initSettings();
@@ -632,6 +653,19 @@
         localStorage.setItem("supergds-source-info", mode);
       });
     });
+    document.querySelectorAll(".terminal-tab-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const tab = btn.getAttribute("data-tab");
+        if (!tab) return;
+        document.querySelectorAll(".terminal-tab-btn").forEach((b) => {
+          b.classList.toggle("active", b.getAttribute("data-tab") === tab);
+        });
+        const sourcePanel = document.getElementById("terminal-source-panel");
+        const infoPanel = document.getElementById("terminal-info-panel");
+        if (sourcePanel) sourcePanel.style.display = tab === "source" ? "" : "none";
+        if (infoPanel) infoPanel.style.display = tab === "info" ? "" : "none";
+      });
+    });
     const saved = localStorage.getItem("supergds-source-info");
     if (saved) {
       sourceInfoMode = saved;
@@ -639,6 +673,15 @@
         opt.classList.toggle("active", opt.getAttribute("data-mode") === saved);
       });
     }
+    document.getElementById("terminal-source-panel")?.addEventListener("click", (e) => {
+      const target = e.target;
+      if (!target.classList.contains("source-jump")) return;
+      const file = target.getAttribute("data-file");
+      const line = target.getAttribute("data-line");
+      if (!file || !line) return;
+      console.log("[studio] jumpToSource click:", file, line);
+      window.postMessage({ type: "jumpToSource", file, line: parseInt(line, 10) }, "*");
+    });
   }
   init();
 })();

@@ -46,7 +46,19 @@ export class TerminalRenderer {
   }
 
   clear(): void {
-    this.container.innerHTML = '';
+    // Remove only log-entry children (system/stdout/stderr), preserve terminal panel divs
+    const toRemove: Node[] = [];
+    for (const child of Array.from(this.container.childNodes)) {
+      if (child.nodeType === Node.ELEMENT_NODE) {
+        const el = child as HTMLElement;
+        if (el.className === 'system' || el.className === 'stdout' || el.className === 'stderr') {
+          toRemove.push(child);
+        }
+      }
+    }
+    for (const node of toRemove) {
+      this.container.removeChild(node);
+    }
   }
 }
 

@@ -66,7 +66,7 @@
           const line = typeof prov.line === "number" ? prov.line : parseInt(String(prov.line), 10);
           if (!isNaN(line)) {
             decorations.push({
-              range: new monacoObj.Range(line, 1, line, model.getLineMaxLength(line)),
+              range: new monacoObj.Range(line, 1, line, model.getLineMaxColumn(line)),
               options: {
                 isWholeLine: true,
                 className: "source-highlight",
@@ -150,26 +150,14 @@
       }
     }
     jumpToSourceInEditor(file, line) {
-      console.log("[iframeBridge] jumpToSourceInEditor called:", file, line);
       const studio = window.studio;
-      if (!studio?.editor) {
-        console.log("[iframeBridge] studio.editor not available");
-        return;
-      }
+      if (!studio?.editor) return;
+      const targetFile = file.replace(/\\/g, "/").split("/").pop() ?? "";
+      const openFile = studio.currentFile?.replace(/\\/g, "/").split("/").pop() ?? "";
+      if (openFile !== targetFile) return;
       const editor = studio.editor;
       const model = editor.getModel?.();
-      if (!model) {
-        console.log("[iframeBridge] no model in editor");
-        return;
-      }
-      const currentUri = model.uri?.toString() ?? "";
-      const targetUri = `file:///${file.replace(/\\/g, "/")}`;
-      console.log("[iframeBridge] currentUri:", currentUri, "targetUri:", targetUri);
-      if (currentUri !== targetUri) {
-        console.log("[iframeBridge] target file not open in editor \u2014 doing nothing");
-        return;
-      }
-      console.log("[iframeBridge] file is open, revealing line and highlighting");
+      if (!model) return;
       editor.revealLine?.(
         line,
         0
@@ -178,7 +166,7 @@
       const monacoObj = window.monaco;
       if (monacoObj && model) {
         editor.deltaDecorations?.([], [{
-          range: new monacoObj.Range(line, 1, line, model.getLineMaxLength(line)),
+          range: new monacoObj.Range(line, 1, line, model.getLineMaxColumn(line)),
           options: {
             isWholeLine: true,
             className: "source-highlight",

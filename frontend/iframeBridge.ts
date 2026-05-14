@@ -87,7 +87,7 @@ export class IframeBridge {
     if (!studio?.editor) return;
 
     const editor = studio.editor as {
-      getModel: () => { getLineMaxLength: (line: number) => number } | null;
+      getModel: () => { getLineMaxColumn: (line: number) => number } | null;
       deltaDecorations: (old: string[], newDecs: unknown[]) => string[];
     };
     const model = editor.getModel();
@@ -105,7 +105,7 @@ export class IframeBridge {
         const line = typeof prov.line === 'number' ? prov.line : parseInt(String(prov.line), 10);
         if (!isNaN(line)) {
           decorations.push({
-            range: new monacoObj.Range(line, 1, line, model.getLineMaxLength(line)),
+            range: new monacoObj.Range(line, 1, line, model.getLineMaxColumn(line)),
             options: {
               isWholeLine: true,
               className: 'source-highlight',
@@ -205,41 +205,28 @@ export class IframeBridge {
   }
 
   private jumpToSourceInEditor(file: string, line: number): void {
-  console.log('[iframeBridge] jumpToSourceInEditor called:', file, line);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const studio = (window as any).studio;
-  if (!studio?.editor) {
-    console.log('[iframeBridge] studio.editor not available');
-    return;
-  }
+  if (!studio?.editor) return;
+
+  // Compare file names — provenance may be absolute path, studio.currentFile may be relative
+  const targetFile = file.replace(/\\/g, '/').split('/').pop() ?? '';
+  const openFile = studio.currentFile?.replace(/\\/g, '/').split('/').pop() ?? '';
+  if (openFile !== targetFile) return; // file not open — silent no-op
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const editor = studio.editor as any;
   const model = editor.getModel?.();
-  if (!model) {
-    console.log('[iframeBridge] no model in editor');
-    return;
-  }
-
-  const currentUri = model.uri?.toString() ?? '';
-  const targetUri = `file:///${file.replace(/\\/g, '/')}`;
-  console.log('[iframeBridge] currentUri:', currentUri, 'targetUri:', targetUri);
-
-  if (currentUri !== targetUri) {
-    console.log('[iframeBridge] target file not open in editor — doing nothing');
-    return;
-  }
+  if (!model) return;
 
   // File is open — reveal line and highlight it
-  console.log('[iframeBridge] file is open, revealing line and highlighting');
   editor.revealLine?.(line, 0 /* SmoothScroll */);
 
-  // Re-apply highlight decoration on this line
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const monacoObj = (window as any).monaco;
   if (monacoObj && model) {
     editor.deltaDecorations?.([], [{
-      range: new monacoObj.Range(line, 1, line, model.getLineMaxLength(line)),
+      range: new monacoObj.Range(line, 1, line, model.getLineMaxColumn(line)),
       options: {
         isWholeLine: true,
         className: 'source-highlight',
