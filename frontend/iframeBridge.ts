@@ -52,11 +52,13 @@ export class IframeBridge {
         }
         this.pending = [];
         break;
-      case 'selectComponents':
+      case 'selectComponents': {
         // forwardToEditor is for VS Code mode (Monaco decorations) - skip in standalone mode
-        this.currentComponents = msg.components || [];
-        this.updateTerminalPanels(msg.components);
+        const components = msg.components || [];
+        this.currentComponents = components;
+        this.updateTerminalPanels(components);
         break;
+      }
       case 'askClaude':
         this.handleAskClaude(msg.components, msg.question);
         break;
