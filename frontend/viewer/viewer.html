@@ -1727,6 +1727,59 @@ window.addEventListener('message', function(event) {
         case 'rebuildError':
             onRebuildComplete();
             break;
+        case 'selectBySource':
+            // Select all features matching the given file and line
+            (function() {
+                var targetFile = (message.file || '').replace(/\\/g, '/');
+                var targetLine = message.line;
+                if (!targetFile || !targetLine) return;
+
+                var matches = allFeatures.filter(function(f) {
+                    var prov = f.get('provenance') || {};
+                    var fFile = (prov.file || '').replace(/\\/g, '/');
+                    // Compare filenames (basename) to handle absolute vs relative paths
+                    var fBase = fFile.split('/').pop() || '';
+                    var tBase = targetFile.split('/').pop() || '';
+                    if (fBase !== tBase && fFile !== targetFile) return false;
+                    var fLine = typeof prov.line === 'number' ? prov.line : parseInt(String(prov.line), 10);
+                    return fLine === targetLine;
+                });
+
+                // Also check call_chain entries
+                var chainMatches = allFeatures.filter(function(f) {
+                    var prov = f.get('provenance') || {};
+                    var chain = prov.call_chain || [];
+                    return chain.some(function(cc) {
+                        var ccFile = (cc.file || '').replace(/\\/g, '/');
+                        var ccBase = ccFile.split('/').pop() || '';
+                        var tBase = targetFile.split('/').pop() || '';
+                        if (ccBase !== tBase && ccFile !== targetFile) return false;
+                        var ccLine = typeof cc.line === 'number' ? cc.line : parseInt(String(cc.line), 10);
+                        return ccLine === targetLine;
+                    });
+                });
+
+                // Merge, deduplicate by ol_uid
+                var seen = {};
+                var all = [];
+                matches.concat(chainMatches).forEach(function(f) {
+                    if (!seen[f.ol_uid]) {
+                        seen[f.ol_uid] = true;
+                        all.push(f);
+                    }
+                });
+
+                if (all.length > 0) {
+                    replaceSelection(all);
+                    // Fit view to show selected features
+                    var extent = all[0].getGeometry().getExtent().slice(0);
+                    for (var i = 1; i < all.length; i++) {
+                        ol.extent.extend(extent, all[i].getGeometry().getExtent());
+                    }
+                    map.getView().fit(extent, { padding: [60, 60, 60, 60], duration: 300 });
+                }
+            })();
+            break;
     }
 });
 
