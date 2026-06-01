@@ -913,6 +913,10 @@ function initSettings() {
     // Also select corresponding polygons in the viewer
     if (bridge) {
       bridge.sendSelectBySource(file, parseInt(line, 10));
+
+      // Toggle active visual state on source entries
+      document.querySelectorAll('.source-jump.active').forEach(el => el.classList.remove('active'));
+      target.classList.add('active');
     }
   });
 }

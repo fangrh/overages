@@ -724,3 +724,7 @@ body {
 .source-jump:hover {
   color: #cba6f7 !important;
 }
+.source-jump.active {
+  color: #a6e3a1 !important;
+  font-weight: 600;
+}

@@ -56,6 +56,8 @@ export class IframeBridge {
         // forwardToEditor is for VS Code mode (Monaco decorations) - skip in standalone mode
         const components = msg.components || [];
         this.currentComponents = components;
+        // Clear active source-jump states (selection came from viewer, not source panel)
+        document.querySelectorAll('.source-jump.active').forEach(el => el.classList.remove('active'));
         this.updateTerminalPanels(components);
         break;
       }
