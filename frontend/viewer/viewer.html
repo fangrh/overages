@@ -1731,8 +1731,8 @@ window.addEventListener('message', function(event) {
             // Select all features matching the given file and line
             (function() {
                 var targetFile = (message.file || '').replace(/\\/g, '/');
-                var targetLine = message.line;
-                if (!targetFile || !targetLine) return;
+                var targetLine = parseInt(message.line, 10);
+                if (!targetFile || isNaN(targetLine)) return;
 
                 var matches = allFeatures.filter(function(f) {
                     var prov = f.get('provenance') || {};
