@@ -384,6 +384,38 @@ async function openFile(filePath: string) {
   rebuildBtn.disabled = false;
 }
 
+async function findFileByBasename(basename: string): Promise<string | null> {
+  try {
+    const res = await fetch('/api/files');
+    if (!res.ok) return null;
+    const { files } = await res.json();
+    const match = (files as string[]).find(f => f.replace(/\\/g, '/').split('/').pop() === basename);
+    return match || null;
+  } catch {
+    return null;
+  }
+}
+
+function jumpToLine(line: number): void {
+  if (!editor) return;
+  const model = editor.getModel?.();
+  if (!model) return;
+
+  editor.revealLine?.(line, 0 /* SmoothScroll */);
+
+  const monacoObj = (window as any).monaco;
+  if (monacoObj) {
+    editor.deltaDecorations?.([], [{
+      range: new monacoObj.Range(line, 1, line, model.getLineMaxColumn(line)),
+      options: {
+        isWholeLine: true,
+        className: 'source-highlight',
+        glyphMarginClassName: 'source-glyph',
+      },
+    }]);
+  }
+}
+
 async function handleFolderOpen(e: Event) {
   const input = e.target as HTMLInputElement;
   if (!input.files?.length) return;
@@ -898,21 +930,37 @@ function initSettings() {
     });
   }
 
-  // Source jump click handler — forward to iframeBridge which calls Monaco
-  document.getElementById('terminal-source-panel')?.addEventListener('click', (e) => {
+  // Source jump click handler — open file in Monaco, jump to line, and select polygons
+  document.getElementById('terminal-source-panel')?.addEventListener('click', async (e) => {
     const target = e.target as HTMLElement;
     if (!target.classList.contains('source-jump')) return;
     const file = target.getAttribute('data-file');
     const line = target.getAttribute('data-line');
     if (!file || !line) return;
 
-    // Forward to iframeBridge via postMessage on the parent window (iframeBridge listens here)
-    console.log('[studio] jumpToSource click:', file, line);
-    window.postMessage({ type: 'jumpToSource', file, line: parseInt(line, 10) }, '*');
+    const lineNum = parseInt(line, 10);
+
+    // Check if the target file is already open in Monaco
+    const targetBasename = file.replace(/\\/g, '/').split('/').pop() ?? '';
+    const openBasename = currentFile?.replace(/\\/g, '/').split('/').pop() ?? '';
+
+    if (openBasename !== targetBasename) {
+      // File not open — try to open it first
+      // Provenance may have full path; find matching file in tree
+      const matchedPath = await findFileByBasename(targetBasename);
+      if (matchedPath) {
+        await openFile(matchedPath);
+      } else {
+        return; // can't find file in workspace
+      }
+    }
+
+    // Now jump to line in Monaco
+    jumpToLine(lineNum);
 
     // Also select corresponding polygons in the viewer
     if (bridge) {
-      bridge.sendSelectBySource(file, parseInt(line, 10));
+      bridge.sendSelectBySource(file, lineNum);
 
       // Toggle active visual state on source entries
       document.querySelectorAll('.source-jump.active').forEach(el => el.classList.remove('active'));
