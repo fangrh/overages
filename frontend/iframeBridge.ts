@@ -68,6 +68,11 @@ export class IframeBridge {
         console.log('[iframeBridge] received jumpToSource:', msg.file, msg.line);
         this.jumpToSourceInEditor(msg.file, msg.line);
         break;
+      case 'requestSource':
+        // From viewer's source panel — open file in Monaco and jump to line
+        console.log('[iframeBridge] received requestSource:', msg.file, msg.line);
+        this.handleRequestSource(msg.file, msg.line);
+        break;
     }
   }
 
@@ -136,6 +141,36 @@ export class IframeBridge {
 
   private handleAskClaude(components: ComponentSelection[], question: string): void {
     console.log('askClaude', components, question);
+  }
+
+  private async handleRequestSource(file: string, line: number): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const studio = (window as any).studio;
+    if (!studio) return;
+
+    const targetBasename = file.replace(/\\/g, '/').split('/').pop() ?? '';
+    const openBasename = studio.currentFile?.replace(/\\/g, '/').split('/').pop() ?? '';
+
+    if (openBasename !== targetBasename) {
+      // Find the file in workspace and open it
+      try {
+        const res = await fetch('/api/files');
+        if (!res.ok) return;
+        const { files } = await res.json();
+        const match = (files as string[]).find((f: string) => f.replace(/\\/g, '/').split('/').pop() === targetBasename);
+        if (match && studio.openFile) {
+          await studio.openFile(match);
+        } else {
+          return;
+        }
+      } catch {
+        return;
+      }
+    }
+
+    if (studio.jumpToLine) {
+      studio.jumpToLine(line);
+    }
   }
 
   private updateTerminalPanels(components: ComponentSelection[]): void {

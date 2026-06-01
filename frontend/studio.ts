@@ -762,7 +762,7 @@ export function init() {
   rebuildBtn.addEventListener('click', handleRebuild);
 
   // Expose studio for debugging
-  (window as any).studio = { editor, bridge, terminal, currentFile: null };
+  (window as any).studio = { editor, bridge, terminal, currentFile: null, openFile, jumpToLine };
 
   // Restore workspace from server-persisted state
   restoreWorkspace();
