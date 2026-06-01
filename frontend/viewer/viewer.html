@@ -607,6 +607,18 @@ function updateMultiSourcePanel(fileMap, features) {
         return;
     }
 
+    // Detect if all features share the same file+line — if so, suppress array_index/loop_index
+    var allSameSource = features && features.length > 1 && (function() {
+        var first = features[0].get('provenance') || {};
+        var firstFile = (first.file || '').replace(/\\/g, '/');
+        var firstLine = first.line ? parseInt(first.line) : null;
+        return features.every(function(f) {
+            var p = f.get('provenance') || {};
+            return (p.file || '').replace(/\\/g, '/') === firstFile &&
+                   (p.line ? parseInt(p.line) : null) === firstLine;
+        });
+    })();
+
     // Show numbered component list with full provenance, one line per source location
     if (features && features.length > 0) {
         features.forEach(function(f, idx) {
@@ -617,11 +629,12 @@ function updateMultiSourcePanel(fileMap, features) {
             if (!compFile) return;
 
             // Build index label — innermost repeat first, then outer
+            // Suppress index when all selected features share the same file+line (full array/loop selected)
             var indexParts = [];
-            if (prov.array_index && prov.array_index.length > 0) {
+            if (!allSameSource && prov.array_index && prov.array_index.length > 0) {
                 indexParts.push('array index [' + prov.array_index.join(', ') + ']');
             }
-            if (prov.loop_index && prov.loop_index.length > 0) {
+            if (!allSameSource && prov.loop_index && prov.loop_index.length > 0) {
                 indexParts.push('loop index [' + prov.loop_index.join(', ') + ']');
             }
             var indexLabel = indexParts.length > 0 ? ' (' + indexParts.join(', ') + ')' : '';
@@ -682,7 +695,7 @@ function updateMultiSourcePanel(fileMap, features) {
                     tipDiv.innerHTML = '<span class="key" style="color:#89b4fa;">&nbsp;&nbsp;💡</span><span class="val" style="color:#89b4fa;">store in array (e.g. ' + esc(plural) + '[i] = ' + esc(varName) + ') to reference by variable name</span>';
                     panel.appendChild(tipDiv);
                 }
-                if (prov.array_index && prov.array_index.length > 0) {
+                if (!allSameSource && prov.array_index && prov.array_index.length > 0) {
                     var arrWarnDiv = document.createElement('div');
                     arrWarnDiv.className = 'kv';
                     arrWarnDiv.innerHTML = '<span class="key" style="color:#f9e2af;">&nbsp;&nbsp;⚠</span><span class="val" style="color:#f9e2af;">array element — variable name refers to the whole array, not this individual element</span>';
