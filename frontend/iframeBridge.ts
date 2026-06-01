@@ -84,6 +84,15 @@ export class IframeBridge {
     this.iframe.contentWindow?.postMessage(msg, '*');
   }
 
+  sendSelectBySource(file: string, line: number): void {
+    if (!this.ready) return;
+    this.iframe.contentWindow?.postMessage({
+      type: 'selectBySource',
+      file,
+      line,
+    }, '*');
+  }
+
   private forwardToEditor(components: ComponentSelection[]): void {
     // Highlight source locations in Monaco
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
