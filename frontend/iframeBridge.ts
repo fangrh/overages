@@ -14,6 +14,7 @@ export interface ComponentSelection {
 export class IframeBridge {
   private iframe: HTMLIFrameElement;
   private ready = false;
+  private currentComponents: ComponentSelection[] = [];
   private pending: Array<{
     geojson: unknown;
     gdsPath: string;
@@ -53,6 +54,7 @@ export class IframeBridge {
         break;
       case 'selectComponents':
         // forwardToEditor is for VS Code mode (Monaco decorations) - skip in standalone mode
+        this.currentComponents = msg.components || [];
         this.updateTerminalPanels(msg.components);
         break;
       case 'askClaude':
@@ -100,7 +102,7 @@ export class IframeBridge {
     // Build list of decorations (source line highlights)
     const decorations: unknown[] = [];
     for (const comp of components) {
-      const prov = comp.provenance || {};
+      const prov: Record<string, any> = comp.provenance || {};
       if (prov.file && prov.line) {
         const line = typeof prov.line === 'number' ? prov.line : parseInt(String(prov.line), 10);
         if (!isNaN(line)) {
@@ -137,7 +139,7 @@ export class IframeBridge {
 
     // Info panel: show key-value info for first component
     const comp = components[0];
-    const prov = comp.provenance || {};
+    const prov: Record<string, any> = comp.provenance || {};
     infoPanel.innerHTML = '';
 
     const addKV = (key: string, val: string) => {
