@@ -1,12 +1,14 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
+import websocket from '@fastify/websocket';
 import path from 'path';
 import { registerFileRoutes } from './fileRoutes.js';
 import { registerRunRoutes } from './runRoutes.js';
 import { registerParseRoutes } from './parseRoutes.js';
 import { registerAnnotationRoutes } from './annotationRoutes.js';
 import { registerEnvRoutes } from './envRoutes.js';
+import { registerTerminalRoutes } from './terminalRoutes.js';
 
 const PORT = 3000;
 
@@ -17,6 +19,9 @@ await app.register(cors, {
   credentials: true,
 });
 
+await app.register(websocket);
+
+await registerTerminalRoutes(app);
 await registerFileRoutes(app);
 await registerRunRoutes(app);
 await registerParseRoutes(app);

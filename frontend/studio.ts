@@ -29,6 +29,12 @@ let terminal: any;
 let currentFile: string | null = null;
 let workspacePath: string | null = null;
 
+// xterm.js terminal
+let xterm: any = null;
+let xtermFitAddon: any = null;
+let xtermWs: WebSocket | null = null;
+let activeTerminalTab: 'terminal' | 'output' = 'terminal';
+
 class ResizeHandle {
   private handle: HTMLElement;
   private editorPane: HTMLElement;
@@ -125,7 +131,7 @@ const runBtn = document.getElementById('run-btn') as HTMLButtonElement;
 const rebuildBtn = document.getElementById('rebuild-btn') as HTMLButtonElement;
 const monacoContainer = document.getElementById('monaco-editor')!;
 const iframeViewer = document.getElementById('gds-viewer') as HTMLIFrameElement;
-const terminalBody = document.getElementById('terminal-body')!;
+const terminalBody = document.getElementById('terminal-output')!;
 const fileTree = document.getElementById('file-tree')!;
 const sidebar = document.getElementById('sidebar')!;
 const currentFileLabel = document.getElementById('current-file')!;
@@ -743,6 +749,120 @@ async function handleRebuild() {
   await handleRun();
 }
 
+// ---- xterm.js terminal ----
+
+function initXterm(): void {
+  const container = document.getElementById('terminal-xterm');
+  if (!container) return;
+
+  // Dynamically import xterm from the CDN-loaded global (or bundled)
+  // xterm is loaded via CDN in index.html
+  const xtermLib = (window as any).xtermLib;
+  if (!xtermLib) return;
+
+  xterm = new xtermLib.Terminal({
+    cursorBlink: true,
+    fontSize: 13,
+    fontFamily: "'Cascadia Code', 'Fira Code', monospace",
+    theme: {
+      background: '#11111b',
+      foreground: '#cdd6f4',
+      cursor: '#89b4fa',
+      selectionBackground: '#45475a',
+    },
+  });
+
+  xtermFitAddon = new xtermLib.FitAddon();
+  xterm.loadAddon(xtermFitAddon);
+  xterm.open(container);
+
+  // Fit after a short delay to ensure container has dimensions
+  setTimeout(() => {
+    try { xtermFitAddon.fit(); } catch {}
+  }, 100);
+
+  connectTerminalWs();
+}
+
+function connectTerminalWs(): void {
+  if (!xterm) return;
+
+  const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  xtermWs = new WebSocket(`${wsProtocol}//${location.host}/api/terminal`);
+
+  xtermWs.onopen = () => {
+    // Send initial size
+    if (xtermFitAddon && xterm) {
+      const dims = xtermFitAddon.proposeDimensions();
+      if (dims) {
+        xtermWs?.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
+      }
+    }
+  };
+
+  xtermWs.onmessage = (ev) => {
+    xterm?.write(ev.data);
+  };
+
+  xtermWs.onclose = () => {
+    xterm?.write('\r\n\x1b[90m— connection lost —\x1b[0m\r\n');
+  };
+
+  xtermWs.onerror = () => {
+    xterm?.write('\r\n\x1b[31mTerminal connection error\x1b[0m\r\n');
+  };
+
+  // User input → WebSocket
+  xterm.onData((data: string) => {
+    if (xtermWs?.readyState === WebSocket.OPEN) {
+      xtermWs.send(data);
+    }
+  });
+}
+
+function setupTerminalTabs(): void {
+  const tabBtns = document.querySelectorAll('.terminal-tab-btn');
+  const xtermPanel = document.getElementById('terminal-xterm');
+  const outputPanel = document.getElementById('terminal-output');
+
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const tab = (btn as HTMLElement).getAttribute('data-tab') as 'terminal' | 'output';
+      activeTerminalTab = tab;
+
+      // Update active button
+      tabBtns.forEach(b => b.classList.toggle('active', b === btn));
+
+      // Show/hide panels
+      if (xtermPanel) xtermPanel.style.display = tab === 'terminal' ? '' : 'none';
+      if (outputPanel) outputPanel.style.display = tab === 'output' ? '' : 'none';
+
+      // Refit xterm when switching back to terminal tab
+      if (tab === 'terminal' && xtermFitAddon && xterm) {
+        setTimeout(() => {
+          try {
+            xtermFitAddon.fit();
+            const dims = xtermFitAddon.proposeDimensions();
+            if (dims && xtermWs?.readyState === WebSocket.OPEN) {
+              xtermWs.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
+            }
+          } catch {}
+        }, 50);
+      }
+    });
+  });
+
+  // Reconnect terminal when clicking the Terminal tab
+  if (xtermPanel) {
+    new MutationObserver(() => {
+      if (xtermPanel.style.display !== 'none' && xtermWs?.readyState !== WebSocket.OPEN) {
+        connectTerminalWs();
+      }
+    }).observe(xtermPanel, { attributes: true, attributeFilter: ['style'] });
+  }
+}
+
 export function init() {
   // @ts-ignore - these are set by other chunks loaded via script tags
   editor = (window as any).setupMonaco(monacoContainer);
@@ -751,6 +871,10 @@ export function init() {
   terminal.sourceInfoMode = sourceInfoMode;
   // @ts-ignore
   bridge = new (window as any).IframeBridge(iframeViewer);
+
+  // Initialize xterm.js terminal
+  initXterm();
+  setupTerminalTabs();
 
   // Setup UI
   setupMenuBar();
@@ -904,23 +1028,6 @@ function initSettings() {
     });
   });
 
-  // Terminal tab switching
-  document.querySelectorAll('.terminal-tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const tab = btn.getAttribute('data-tab');
-      if (!tab) return;
-      // Update tab active states
-      document.querySelectorAll('.terminal-tab-btn').forEach(b => {
-        b.classList.toggle('active', b.getAttribute('data-tab') === tab);
-      });
-      // Toggle panel visibility
-      const sourcePanel = document.getElementById('terminal-source-panel');
-      const infoPanel = document.getElementById('terminal-info-panel');
-      if (sourcePanel) sourcePanel.style.display = tab === 'source' ? '' : 'none';
-      if (infoPanel) infoPanel.style.display = tab === 'info' ? '' : 'none';
-    });
-  });
-
   // Load saved preference
   const saved = localStorage.getItem('supergds-source-info') as SourceInfoMode | null;
   if (saved) {
@@ -929,44 +1036,6 @@ function initSettings() {
       opt.classList.toggle('active', opt.getAttribute('data-mode') === saved);
     });
   }
-
-  // Source jump click handler — open file in Monaco, jump to line, and select polygons
-  document.getElementById('terminal-source-panel')?.addEventListener('click', async (e) => {
-    const target = e.target as HTMLElement;
-    if (!target.classList.contains('source-jump')) return;
-    const file = target.getAttribute('data-file');
-    const line = target.getAttribute('data-line');
-    if (!file || !line) return;
-
-    const lineNum = parseInt(line, 10);
-
-    // Check if the target file is already open in Monaco
-    const targetBasename = file.replace(/\\/g, '/').split('/').pop() ?? '';
-    const openBasename = currentFile?.replace(/\\/g, '/').split('/').pop() ?? '';
-
-    if (openBasename !== targetBasename) {
-      // File not open — try to open it first
-      // Provenance may have full path; find matching file in tree
-      const matchedPath = await findFileByBasename(targetBasename);
-      if (matchedPath) {
-        await openFile(matchedPath);
-      } else {
-        return; // can't find file in workspace
-      }
-    }
-
-    // Now jump to line in Monaco
-    jumpToLine(lineNum);
-
-    // Also select corresponding polygons in the viewer
-    if (bridge) {
-      bridge.sendSelectBySource(file, lineNum);
-
-      // Toggle active visual state on source entries
-      document.querySelectorAll('.source-jump.active').forEach(el => el.classList.remove('active'));
-      target.classList.add('active');
-    }
-  });
 }
 
 init();

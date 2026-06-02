@@ -3,7 +3,7 @@ import { getWorkspacePath } from './workspace.js';
 import path from 'path';
 export async function registerRunRoutes(app) {
     app.get('/api/run', async (req, reply) => {
-        const { pythonFile } = req.query;
+        const { pythonFile, pythonPath } = req.query;
         if (!pythonFile)
             throw new Error('pythonFile required');
         const ws = getWorkspacePath();
@@ -18,7 +18,7 @@ export async function registerRunRoutes(app) {
         };
         send('start', { status: 'running', pythonFile });
         try {
-            const result = await runPythonScript({ pythonFile: fullPath, cwd: ws }, (line) => send('stdout', { line }), (line) => send('stderr', { line }));
+            const result = await runPythonScript({ pythonFile: fullPath, cwd: ws, pythonPath }, (line) => send('stdout', { line }), (line) => send('stderr', { line }));
             send('complete', result);
         }
         catch (err) {

@@ -5,6 +5,11 @@ let bridge;
 let terminal;
 let currentFile = null;
 let workspacePath = null;
+// xterm.js terminal
+let xterm = null;
+let xtermFitAddon = null;
+let xtermWs = null;
+let activeTerminalTab = 'terminal';
 class ResizeHandle {
     handle;
     editorPane;
@@ -32,12 +37,10 @@ class ResizeHandle {
             e.preventDefault();
             e.stopPropagation();
         });
-        // Use window-level listeners to catch all pointermove events during capture
-        window.addEventListener('pointermove', (e) => {
-            if (!this.dragging) {
-                console.log('[drag] pointermove but not dragging');
+        // With pointer capture, events route directly to the handle element
+        this.handle.addEventListener('pointermove', (e) => {
+            if (!this.dragging)
                 return;
-            }
             const dx = e.clientX - this.startX;
             const newWidth = this.startEditorWidth + dx;
             const containerWidth = this.editorPane.parentElement.getBoundingClientRect().width;
@@ -51,17 +54,15 @@ class ResizeHandle {
             this.viewerPane.style.flex = 'none';
             this.viewerPane.style.width = `${remainingWidth}px`;
             this.handle.style.left = `${clamped}px`;
-            console.log(`[drag] dx=${dx} newWidth=${newWidth} clamped=${clamped} remaining=${remainingWidth}`);
             // Force iframe to recalculate its content size by triggering a reflow
             const iframe = document.getElementById('gds-viewer');
             if (iframe) {
-                // Toggle width to force reflow
                 iframe.style.width = '99%';
                 void iframe.offsetWidth;
                 iframe.style.width = '';
             }
-        }, true);
-        window.addEventListener('pointerup', (e) => {
+        });
+        this.handle.addEventListener('pointerup', (e) => {
             if (!this.dragging)
                 return;
             this.dragging = false;
@@ -76,7 +77,7 @@ class ResizeHandle {
             // Notify viewer iframe to update its map size
             const iframe = document.getElementById('gds-viewer');
             iframe?.contentWindow?.postMessage({ type: 'resize' }, '*');
-        }, true);
+        });
         this.handle.addEventListener('pointercancel', (e) => {
             if (!this.dragging)
                 return;
@@ -100,8 +101,7 @@ const runBtn = document.getElementById('run-btn');
 const rebuildBtn = document.getElementById('rebuild-btn');
 const monacoContainer = document.getElementById('monaco-editor');
 const iframeViewer = document.getElementById('gds-viewer');
-const terminalBody = document.getElementById('terminal-body');
-const clearBtn = document.getElementById('clear-terminal');
+const terminalBody = document.getElementById('terminal-output');
 const fileTree = document.getElementById('file-tree');
 const sidebar = document.getElementById('sidebar');
 const currentFileLabel = document.getElementById('current-file');
@@ -327,8 +327,42 @@ async function openFile(filePath) {
     }
     const { content } = await res.json();
     editor.setValue(content);
+    // Track current file for jump-to-source
+    window.studio.currentFile = filePath;
     runBtn.disabled = false;
     rebuildBtn.disabled = false;
+}
+async function findFileByBasename(basename) {
+    try {
+        const res = await fetch('/api/files');
+        if (!res.ok)
+            return null;
+        const { files } = await res.json();
+        const match = files.find(f => f.replace(/\\/g, '/').split('/').pop() === basename);
+        return match || null;
+    }
+    catch {
+        return null;
+    }
+}
+function jumpToLine(line) {
+    if (!editor)
+        return;
+    const model = editor.getModel?.();
+    if (!model)
+        return;
+    editor.revealLine?.(line, 0 /* SmoothScroll */);
+    const monacoObj = window.monaco;
+    if (monacoObj) {
+        editor.deltaDecorations?.([], [{
+                range: new monacoObj.Range(line, 1, line, model.getLineMaxColumn(line)),
+                options: {
+                    isWholeLine: true,
+                    className: 'source-highlight',
+                    glyphMarginClassName: 'source-glyph',
+                },
+            }]);
+    }
 }
 async function handleFolderOpen(e) {
     const input = e.target;
@@ -593,6 +627,26 @@ async function handleRun() {
         completed = true;
         const data = JSON.parse(e.data);
         bridge.sendLoadGds(data);
+        // Extract source locations from geojson and display in terminal
+        const geojson = data.geojson;
+        if (geojson?.features) {
+            const sources = new Map();
+            for (const f of geojson.features) {
+                const prov = f.properties?.provenance;
+                if (prov?.file && prov?.line) {
+                    const lineNum = typeof prov.line === 'number' ? prov.line : parseInt(String(prov.line), 10);
+                    if (!isNaN(lineNum)) {
+                        sources.set(`${prov.file}:${lineNum}`, { file: prov.file, line: lineNum });
+                    }
+                }
+            }
+            if (sources.size > 0) {
+                terminal.addLine('system', `Found ${sources.size} component(s) with source info:`);
+                for (const [key, src] of sources) {
+                    terminal.addLine('stdout', `  ${src.file}:${src.line}`, { file: src.file, line: src.line });
+                }
+            }
+        }
         terminal.addLine('system', 'Done.');
         es.close();
     });
@@ -617,13 +671,120 @@ async function handleRun() {
 async function handleRebuild() {
     await handleRun();
 }
+// ---- xterm.js terminal ----
+function initXterm() {
+    const container = document.getElementById('terminal-xterm');
+    if (!container)
+        return;
+    // Dynamically import xterm from the CDN-loaded global (or bundled)
+    // xterm is loaded via CDN in index.html
+    const xtermLib = window.xtermLib;
+    if (!xtermLib)
+        return;
+    xterm = new xtermLib.Terminal({
+        cursorBlink: true,
+        fontSize: 13,
+        fontFamily: "'Cascadia Code', 'Fira Code', monospace",
+        theme: {
+            background: '#11111b',
+            foreground: '#cdd6f4',
+            cursor: '#89b4fa',
+            selectionBackground: '#45475a',
+        },
+    });
+    xtermFitAddon = new xtermLib.FitAddon();
+    xterm.loadAddon(xtermFitAddon);
+    xterm.open(container);
+    // Fit after a short delay to ensure container has dimensions
+    setTimeout(() => {
+        try {
+            xtermFitAddon.fit();
+        }
+        catch { }
+    }, 100);
+    connectTerminalWs();
+}
+function connectTerminalWs() {
+    if (!xterm)
+        return;
+    const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    xtermWs = new WebSocket(`${wsProtocol}//${location.host}/api/terminal`);
+    xtermWs.onopen = () => {
+        // Send initial size
+        if (xtermFitAddon && xterm) {
+            const dims = xtermFitAddon.proposeDimensions();
+            if (dims) {
+                xtermWs?.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
+            }
+        }
+    };
+    xtermWs.onmessage = (ev) => {
+        xterm?.write(ev.data);
+    };
+    xtermWs.onclose = () => {
+        xterm?.write('\r\n\x1b[90m— connection lost —\x1b[0m\r\n');
+    };
+    xtermWs.onerror = () => {
+        xterm?.write('\r\n\x1b[31mTerminal connection error\x1b[0m\r\n');
+    };
+    // User input → WebSocket
+    xterm.onData((data) => {
+        if (xtermWs?.readyState === WebSocket.OPEN) {
+            xtermWs.send(data);
+        }
+    });
+}
+function setupTerminalTabs() {
+    const tabBtns = document.querySelectorAll('.terminal-tab-btn');
+    const xtermPanel = document.getElementById('terminal-xterm');
+    const outputPanel = document.getElementById('terminal-output');
+    tabBtns.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const tab = btn.getAttribute('data-tab');
+            activeTerminalTab = tab;
+            // Update active button
+            tabBtns.forEach(b => b.classList.toggle('active', b === btn));
+            // Show/hide panels
+            if (xtermPanel)
+                xtermPanel.style.display = tab === 'terminal' ? '' : 'none';
+            if (outputPanel)
+                outputPanel.style.display = tab === 'output' ? '' : 'none';
+            // Refit xterm when switching back to terminal tab
+            if (tab === 'terminal' && xtermFitAddon && xterm) {
+                setTimeout(() => {
+                    try {
+                        xtermFitAddon.fit();
+                        const dims = xtermFitAddon.proposeDimensions();
+                        if (dims && xtermWs?.readyState === WebSocket.OPEN) {
+                            xtermWs.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
+                        }
+                    }
+                    catch { }
+                }, 50);
+            }
+        });
+    });
+    // Reconnect terminal when clicking the Terminal tab
+    if (xtermPanel) {
+        new MutationObserver(() => {
+            if (xtermPanel.style.display !== 'none' && xtermWs?.readyState !== WebSocket.OPEN) {
+                connectTerminalWs();
+            }
+        }).observe(xtermPanel, { attributes: true, attributeFilter: ['style'] });
+    }
+}
 export function init() {
     // @ts-ignore - these are set by other chunks loaded via script tags
     editor = window.setupMonaco(monacoContainer);
     // @ts-ignore
     terminal = new window.TerminalRenderer(terminalBody);
+    terminal.sourceInfoMode = sourceInfoMode;
     // @ts-ignore
     bridge = new window.IframeBridge(iframeViewer);
+    // Initialize xterm.js terminal
+    initXterm();
+    setupTerminalTabs();
     // Setup UI
     setupMenuBar();
     setupSidebar();
@@ -631,13 +792,14 @@ export function init() {
     folderInput.addEventListener('change', handleFolderOpen);
     runBtn.addEventListener('click', handleRun);
     rebuildBtn.addEventListener('click', handleRebuild);
-    clearBtn.addEventListener('click', () => terminal.clear());
     // Expose studio for debugging
-    window.studio = { editor, bridge, terminal };
+    window.studio = { editor, bridge, terminal, currentFile: null, openFile, jumpToLine };
     // Restore workspace from server-persisted state
     restoreWorkspace();
     // Load Python environments
     loadPythonEnvironments();
+    // Initialize terminal settings
+    initSettings();
     // Restore layout mode from sessionStorage
     const savedLayout = sessionStorage.getItem('supergds-layout');
     setLayoutMode(savedLayout || 'split');
@@ -732,6 +894,41 @@ async function restoreWorkspace() {
     }
     catch {
         // No persisted workspace — user will open one manually
+    }
+}
+let sourceInfoMode = 'off';
+function initSettings() {
+    const settingsBtn = document.getElementById('terminal-settings');
+    const dropdown = document.getElementById('terminal-settings-dropdown');
+    if (!settingsBtn || !dropdown)
+        return;
+    settingsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dropdown.classList.toggle('hidden');
+    });
+    document.addEventListener('click', () => {
+        dropdown.classList.add('hidden');
+    });
+    dropdown.querySelectorAll('.terminal-settings-option').forEach(el => {
+        el.addEventListener('click', () => {
+            const mode = el.getAttribute('data-mode');
+            sourceInfoMode = mode;
+            // Update active states
+            dropdown.querySelectorAll('.terminal-settings-option').forEach(opt => {
+                opt.classList.toggle('active', opt.getAttribute('data-mode') === mode);
+            });
+            dropdown.classList.add('hidden');
+            // Persist preference
+            localStorage.setItem('supergds-source-info', mode);
+        });
+    });
+    // Load saved preference
+    const saved = localStorage.getItem('supergds-source-info');
+    if (saved) {
+        sourceInfoMode = saved;
+        dropdown.querySelectorAll('.terminal-settings-option').forEach(opt => {
+            opt.classList.toggle('active', opt.getAttribute('data-mode') === saved);
+        });
     }
 }
 init();

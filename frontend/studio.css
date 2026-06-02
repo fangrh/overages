@@ -627,12 +627,23 @@ body {
 
 /* Terminal tab panels */
 .terminal-tab-panel {
-  height: 100%;
+  flex: 1;
   overflow-y: auto;
-  padding: 8px 12px;
   font: 13px/1.5 'Cascadia Code', 'Fira Code', monospace;
   color: #cdd6f4;
 }
+
+/* xterm container — no padding, fills panel */
+#terminal-xterm {
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Output panel — padded log view */
+#terminal-output {
+  padding: 8px 12px;
+}
+
 .terminal-tab-panel .placeholder { color: #585b70; font-size: 12px; }
 .terminal-tab-panel .kv { display: flex; gap: 8px; padding: 1px 0; }
 .terminal-tab-panel .kv .key { color: #6c7086; min-width: 90px; flex-shrink: 0; text-align: right; }
@@ -650,6 +661,11 @@ body {
 #terminal-body .stderr { color: #f38ba8; }
 #terminal-body .system { color: #6c7086; font-style: italic; }
 #terminal-body .timestamp { font-size: 11px; }
+
+#terminal-output .stdout { color: #cdd6f4; }
+#terminal-output .stderr { color: #f38ba8; }
+#terminal-output .system { color: #6c7086; font-style: italic; }
+#terminal-output .timestamp { font-size: 11px; }
 
 .source-highlight { background: rgba(137, 180, 250, 0.15) !important; }
 .source-glyph { background: #89b4fa; width: 4px !important; margin-left: 3px; }

@@ -264,49 +264,85 @@ function clearSelection() {
 }
 
 // Progressive Ctrl+A selection:
-//   0 → 1: select all elements of the same array instance (same instance_name base)
-//   1 → 2: select all elements sharing the same loop_index (same iteration level)
+//   0 → 1: select all elements of the same placement (instance_name + file + line)
+//           If no instance_name, skip to L2.
+//   1 → 2: expand to same for-loop iteration (file + placement_line + loop_index)
 //   2 → 0: clear selection
 function handleCtrlA() {
     var features = selectedFeatures.getArray();
 
     if (selectionCycle === 0) {
-        // L1: group by exact instance_name (same add_ref call, all array elements)
+        // L1: group by instance_name + file + line (one add_ref call)
         if (features.length === 0) return;
         var anchor = features[0];
         var prov = anchor.get('provenance') || {};
         var groupInst = prov.instance_name || '';
+        var groupFile = (prov.file || '').replace(/\\/g, '/');
+        var groupLine = prov.line;
+
+        // If no instance_name, skip L1 and go straight to L2
+        if (!groupInst) {
+            selectionCycle = 1;
+            handleCtrlA();
+            return;
+        }
 
         var sameInstance = allFeatures.filter(function(f) {
             var fProv = f.get('provenance') || {};
-            return (fProv.instance_name || '') === groupInst;
+            if ((fProv.instance_name || '') !== groupInst) return false;
+            if ((fProv.file || '').replace(/\\/g, '/') !== groupFile) return false;
+            if (fProv.line !== groupLine) return false;
+            return true;
         });
+        // If L1 didn't expand beyond current selection, skip to L2
+        if (sameInstance.length <= features.length) {
+            selectionCycle = 1;
+            handleCtrlA();
+            return;
+        }
         replaceSelection(sameInstance);
         selectionCycle = 1;
         rewriteLabels('[:]');
-        var cycleText = ['', 'L1: same instance  Ctrl+A→L2', 'L2: same loop  Ctrl+A→clear'];
         var cycleEl = document.getElementById('cycle-indicator');
-        if (cycleEl) { cycleEl.textContent = cycleText[selectionCycle]; cycleEl.style.display = selectionCycle > 0 ? 'block' : 'none'; }
+        if (cycleEl) { cycleEl.textContent = 'L1: same placement  Ctrl+A→L2'; cycleEl.style.display = 'block'; }
 
     } else if (selectionCycle === 1) {
-        // L2: expand to all iterations of the same for-loop (same placement_line)
+        // L2: expand to same for-loop iteration.
+        // Group by file + placement_line + loop_index (same source line, same loop iteration).
+        // If no loop_index, this matches all features from the same placement_line.
         var anchor = selectedFeatures.getArray()[0];
         var prov = anchor ? anchor.get('provenance') || {} : {};
+        var anchorFile = (prov.file || '').replace(/\\/g, '/');
         var anchorPLine = prov.placement_line;
+        var anchorLoopIdx = prov.loop_index;
 
         var sameLoop = allFeatures.filter(function(f) {
             var fProv = f.get('provenance') || {};
+            var fFile = (fProv.file || '').replace(/\\/g, '/');
+            if (fFile !== anchorFile) return false;
+
+            // Match same placement_line (or both undefined)
             var fPLine = fProv.placement_line;
-            if (anchorPLine !== undefined && fPLine === anchorPLine) return true;
-            if (anchorPLine === undefined && fPLine === undefined) return true;
-            return false;
+            if (anchorPLine !== undefined && fPLine !== anchorPLine) return false;
+            if (anchorPLine === undefined && fPLine !== undefined) return false;
+
+            // If anchor has loop_index, also require same loop_index
+            if (anchorLoopIdx !== undefined && anchorLoopIdx !== null) {
+                var fLoopIdx = fProv.loop_index;
+                if (fLoopIdx === undefined || fLoopIdx === null) return false;
+                if (anchorLoopIdx.length !== fLoopIdx.length) return false;
+                for (var i = 0; i < anchorLoopIdx.length; i++) {
+                    if (anchorLoopIdx[i] !== fLoopIdx[i]) return false;
+                }
+            }
+
+            return true;
         });
         replaceSelection(sameLoop);
         selectionCycle = 2;
         rewriteLabels('[:]');
-        var cycleText = ['', 'L1: same instance  Ctrl+A→L2', 'L2: same loop  Ctrl+A→clear'];
         var cycleEl = document.getElementById('cycle-indicator');
-        if (cycleEl) { cycleEl.textContent = cycleText[selectionCycle]; cycleEl.style.display = selectionCycle > 0 ? 'block' : 'none'; }
+        if (cycleEl) { cycleEl.textContent = 'L2: same loop iteration  Ctrl+A→clear'; cycleEl.style.display = 'block'; }
 
     } else {
         // Cycle complete: clear and reset
@@ -315,6 +351,57 @@ function handleCtrlA() {
         selectionCycle = 0;
         var cycleEl = document.getElementById('cycle-indicator');
         if (cycleEl) { cycleEl.textContent = ''; cycleEl.style.display = 'none'; }
+    }
+}
+
+// Select all features matching a given file and line (used by source panel clicks
+// and by the selectBySource postMessage handler).
+function _selectFeaturesBySource(targetFile, targetLine) {
+    targetFile = (targetFile || '').replace(/\\/g, '/');
+    targetLine = parseInt(targetLine, 10);
+    if (!targetFile || isNaN(targetLine)) return;
+
+    var matches = allFeatures.filter(function(f) {
+        var prov = f.get('provenance') || {};
+        var fFile = (prov.file || '').replace(/\\/g, '/');
+        var fBase = fFile.split('/').pop() || '';
+        var tBase = targetFile.split('/').pop() || '';
+        if (fBase !== tBase && fFile !== targetFile) return false;
+        var fLine = typeof prov.line === 'number' ? prov.line : parseInt(String(prov.line), 10);
+        return fLine === targetLine;
+    });
+
+    // Also check call_chain entries
+    var chainMatches = allFeatures.filter(function(f) {
+        var prov = f.get('provenance') || {};
+        var chain = prov.call_chain || [];
+        return chain.some(function(cc) {
+            var ccFile = (cc.file || '').replace(/\\/g, '/');
+            var ccBase = ccFile.split('/').pop() || '';
+            var tBase = targetFile.split('/').pop() || '';
+            if (ccBase !== tBase && ccFile !== targetFile) return false;
+            var ccLine = typeof cc.line === 'number' ? cc.line : parseInt(String(cc.line), 10);
+            return ccLine === targetLine;
+        });
+    });
+
+    // Merge, deduplicate by ol_uid
+    var seen = {};
+    var all = [];
+    matches.concat(chainMatches).forEach(function(f) {
+        if (!seen[f.ol_uid]) {
+            seen[f.ol_uid] = true;
+            all.push(f);
+        }
+    });
+
+    if (all.length > 0) {
+        replaceSelection(all);
+        var extent = all[0].getGeometry().getExtent().slice(0);
+        for (var i = 1; i < all.length; i++) {
+            ol.extent.extend(extent, all[i].getGeometry().getExtent());
+        }
+        map.getView().fit(extent, { padding: [60, 60, 60, 60], duration: 300 });
     }
 }
 
@@ -563,8 +650,12 @@ function showMultiInspect(features) {
             comps.forEach(function(comp, ci) {
                 var bboxStr = '[' + comp.bbox.map(function(v) { return v.toFixed(4); }).join(', ') + ']';
                 var lineNum = comp.line !== null ? comp.line : '?';
-                var loopStr = comp.array_index ? ' (array index [' + comp.array_index.join(', ') + '])' : '';
-                loopStr += comp.loop_index ? ' (loop index [' + comp.loop_index.join(', ') + '])' : '';
+                var loopStr = '';
+                // In grouped selection, suppress individual indices (they're shown in source panel summary)
+                if (!(typeof selectionCycle !== 'undefined' && selectionCycle > 0)) {
+                    if (comp.array_index) loopStr += ' (array index [' + comp.array_index.join(', ') + '])';
+                    if (comp.loop_index) loopStr += ' (loop index [' + comp.loop_index.join(', ') + '])';
+                }
                 addKV(panel, '', '  Component ' + (ci + 1) + ': Line ' + lineNum + loopStr + ', bbox:' + bboxStr);
             });
         });
@@ -607,7 +698,10 @@ function updateMultiSourcePanel(fileMap, features) {
         return;
     }
 
-    // Detect if all features share the same file+line — if so, suppress array_index/loop_index
+    // When Ctrl+A grouped selection is active, show array/loop range summary
+    var isGroupedSelection = typeof selectionCycle !== 'undefined' && selectionCycle > 0;
+
+    // Detect if all features share the same file+line
     var allSameSource = features && features.length > 1 && (function() {
         var first = features[0].get('provenance') || {};
         var firstFile = (first.file || '').replace(/\\/g, '/');
@@ -619,8 +713,70 @@ function updateMultiSourcePanel(fileMap, features) {
         });
     })();
 
+    // When grouped (Ctrl+A), compute array_index and loop_index ranges across all features
+    var arrayRangeLabel = '';
+    var loopRangeLabel = '';
+    if (isGroupedSelection && features.length > 1) {
+        // Collect all unique array_index values and compute range
+        var allArrayIndices = [];
+        var allLoopIndices = [];
+        features.forEach(function(f) {
+            var p = f.get('provenance') || {};
+            if (p.array_index && p.array_index.length > 0) {
+                allArrayIndices.push(p.array_index);
+            }
+            if (p.loop_index && p.loop_index.length > 0) {
+                allLoopIndices.push(p.loop_index);
+            }
+        });
+        if (allArrayIndices.length > 1) {
+            // Show range like "array [0,0]..[2,1] (6 elements)"
+            var minIdx = allArrayIndices.reduce(function(a, b) { return a < b ? a : b; });
+            var maxIdx = allArrayIndices.reduce(function(a, b) { return a > b ? a : b; });
+            var minStr = '[' + minIdx.join(', ') + ']';
+            var maxStr = '[' + maxIdx.join(', ') + ']';
+            arrayRangeLabel = minStr === maxStr ? 'array ' + minStr : 'array ' + minStr + '..' + maxStr + ' (' + allArrayIndices.length + ')';
+        }
+        if (allLoopIndices.length > 0) {
+            var uniqueLoopVals = [];
+            var seenLoop = {};
+            allLoopIndices.forEach(function(li) {
+                var key = li.join(',');
+                if (!seenLoop[key]) { seenLoop[key] = true; uniqueLoopVals.push(li); }
+            });
+            if (uniqueLoopVals.length === 1) {
+                loopRangeLabel = 'loop [' + uniqueLoopVals[0].join(', ') + ']';
+            } else {
+                loopRangeLabel = uniqueLoopVals.length + ' loop iterations';
+            }
+        }
+    }
+
     // Show numbered component list with full provenance, one line per source location
     if (features && features.length > 0) {
+        // When grouped, show a single summary line instead of per-element list
+        if (isGroupedSelection && allSameSource && features.length > 1) {
+            var firstProv = features[0].get('provenance') || {};
+            var summaryFile = firstProv.file ? firstProv.file.replace(/\\/g, '/') : '';
+            var summaryLine = firstProv.line ? parseInt(firstProv.line) : null;
+            if (summaryFile) {
+                var summaryLabel = features.length + ' elements';
+                if (arrayRangeLabel) summaryLabel += ' | ' + arrayRangeLabel;
+                if (loopRangeLabel) summaryLabel += ' | ' + loopRangeLabel;
+
+                var summaryDiv = document.createElement('div');
+                summaryDiv.className = 'kv';
+                summaryDiv.innerHTML = '<span class="key">Selected</span><span class="val hl" style="cursor:pointer;">@' + esc(summaryFile + '#' + summaryLine) + ' (' + summaryLabel + ')</span>';
+                summaryDiv.querySelector('.val').addEventListener('click', function() {
+                    var msg = { type: 'requestSource', file: summaryFile, line: summaryLine };
+                    if (vscode) vscode.postMessage(msg);
+                    else if (window.parent !== window) window.parent.postMessage(msg, '*');
+                    // Also select matching polygons in the viewer
+                    _selectFeaturesBySource(summaryFile, summaryLine);
+                });
+                panel.appendChild(summaryDiv);
+            }
+        } else {
         features.forEach(function(f, idx) {
             var prov = f.get('provenance') || {};
             var compFile = prov.file ? prov.file.replace(/\\/g, '/') : '';
@@ -628,13 +784,13 @@ function updateMultiSourcePanel(fileMap, features) {
 
             if (!compFile) return;
 
-            // Build index label — innermost repeat first, then outer
-            // Suppress index when all selected features share the same file+line (full array/loop selected)
+            // Build index label
             var indexParts = [];
-            if (!allSameSource && prov.array_index && prov.array_index.length > 0) {
+            var suppressIndex = allSameSource || isGroupedSelection;
+            if (!suppressIndex && prov.array_index && prov.array_index.length > 0) {
                 indexParts.push('array index [' + prov.array_index.join(', ') + ']');
             }
-            if (!allSameSource && prov.loop_index && prov.loop_index.length > 0) {
+            if (!suppressIndex && prov.loop_index && prov.loop_index.length > 0) {
                 indexParts.push('loop index [' + prov.loop_index.join(', ') + ']');
             }
             var indexLabel = indexParts.length > 0 ? ' (' + indexParts.join(', ') + ')' : '';
@@ -647,6 +803,8 @@ function updateMultiSourcePanel(fileMap, features) {
                 var msg = { type: 'requestSource', file: compFile, line: compLine };
                 if (vscode) vscode.postMessage(msg);
                 else if (window.parent !== window) window.parent.postMessage(msg, '*');
+                // Also select matching polygons in the viewer
+                _selectFeaturesBySource(compFile, compLine);
             });
             panel.appendChild(primaryDiv);
 
@@ -663,6 +821,8 @@ function updateMultiSourcePanel(fileMap, features) {
                     var msg = { type: 'requestSource', file: cfp, line: cc.line };
                     if (vscode) vscode.postMessage(msg);
                     else if (window.parent !== window) window.parent.postMessage(msg, '*');
+                    // Also select matching polygons in the viewer
+                    _selectFeaturesBySource(cfp, cc.line);
                 });
                 panel.appendChild(chainDiv);
             });
@@ -708,6 +868,7 @@ function updateMultiSourcePanel(fileMap, features) {
                 addSep(panel);
             }
         });
+        } // end else (per-feature list)
     }
 }
 
@@ -1741,57 +1902,7 @@ window.addEventListener('message', function(event) {
             onRebuildComplete();
             break;
         case 'selectBySource':
-            // Select all features matching the given file and line
-            (function() {
-                var targetFile = (message.file || '').replace(/\\/g, '/');
-                var targetLine = parseInt(message.line, 10);
-                if (!targetFile || isNaN(targetLine)) return;
-
-                var matches = allFeatures.filter(function(f) {
-                    var prov = f.get('provenance') || {};
-                    var fFile = (prov.file || '').replace(/\\/g, '/');
-                    // Compare filenames (basename) to handle absolute vs relative paths
-                    var fBase = fFile.split('/').pop() || '';
-                    var tBase = targetFile.split('/').pop() || '';
-                    if (fBase !== tBase && fFile !== targetFile) return false;
-                    var fLine = typeof prov.line === 'number' ? prov.line : parseInt(String(prov.line), 10);
-                    return fLine === targetLine;
-                });
-
-                // Also check call_chain entries
-                var chainMatches = allFeatures.filter(function(f) {
-                    var prov = f.get('provenance') || {};
-                    var chain = prov.call_chain || [];
-                    return chain.some(function(cc) {
-                        var ccFile = (cc.file || '').replace(/\\/g, '/');
-                        var ccBase = ccFile.split('/').pop() || '';
-                        var tBase = targetFile.split('/').pop() || '';
-                        if (ccBase !== tBase && ccFile !== targetFile) return false;
-                        var ccLine = typeof cc.line === 'number' ? cc.line : parseInt(String(cc.line), 10);
-                        return ccLine === targetLine;
-                    });
-                });
-
-                // Merge, deduplicate by ol_uid
-                var seen = {};
-                var all = [];
-                matches.concat(chainMatches).forEach(function(f) {
-                    if (!seen[f.ol_uid]) {
-                        seen[f.ol_uid] = true;
-                        all.push(f);
-                    }
-                });
-
-                if (all.length > 0) {
-                    replaceSelection(all);
-                    // Fit view to show selected features
-                    var extent = all[0].getGeometry().getExtent().slice(0);
-                    for (var i = 1; i < all.length; i++) {
-                        ol.extent.extend(extent, all[i].getGeometry().getExtent());
-                    }
-                    map.getView().fit(extent, { padding: [60, 60, 60, 60], duration: 300 });
-                }
-            })();
+            _selectFeaturesBySource((message.file || '').replace(/\\/g, '/'), message.line);
             break;
     }
 });

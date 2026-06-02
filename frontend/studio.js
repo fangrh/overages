@@ -6,6 +6,10 @@
   var terminal;
   var currentFile = null;
   var workspacePath = null;
+  var xterm = null;
+  var xtermFitAddon = null;
+  var xtermWs = null;
+  var activeTerminalTab = "terminal";
   var ResizeHandle = class {
     handle;
     editorPane;
@@ -85,7 +89,7 @@
   var rebuildBtn = document.getElementById("rebuild-btn");
   var monacoContainer = document.getElementById("monaco-editor");
   var iframeViewer = document.getElementById("gds-viewer");
-  var terminalBody = document.getElementById("terminal-body");
+  var terminalBody = document.getElementById("terminal-output");
   var fileTree = document.getElementById("file-tree");
   var sidebar = document.getElementById("sidebar");
   var currentFileLabel = document.getElementById("current-file");
@@ -286,6 +290,27 @@
     window.studio.currentFile = filePath;
     runBtn.disabled = false;
     rebuildBtn.disabled = false;
+  }
+  function jumpToLine(line) {
+    if (!editor) return;
+    const model = editor.getModel?.();
+    if (!model) return;
+    editor.revealLine?.(
+      line,
+      0
+      /* SmoothScroll */
+    );
+    const monacoObj = window.monaco;
+    if (monacoObj) {
+      editor.deltaDecorations?.([], [{
+        range: new monacoObj.Range(line, 1, line, model.getLineMaxColumn(line)),
+        options: {
+          isWholeLine: true,
+          className: "source-highlight",
+          glyphMarginClassName: "source-glyph"
+        }
+      }]);
+    }
   }
   async function handleFolderOpen(e) {
     const input = e.target;
@@ -536,17 +561,107 @@
   async function handleRebuild() {
     await handleRun();
   }
+  function initXterm() {
+    const container = document.getElementById("terminal-xterm");
+    if (!container) return;
+    const xtermLib = window.xtermLib;
+    if (!xtermLib) return;
+    xterm = new xtermLib.Terminal({
+      cursorBlink: true,
+      fontSize: 13,
+      fontFamily: "'Cascadia Code', 'Fira Code', monospace",
+      theme: {
+        background: "#11111b",
+        foreground: "#cdd6f4",
+        cursor: "#89b4fa",
+        selectionBackground: "#45475a"
+      }
+    });
+    xtermFitAddon = new xtermLib.FitAddon();
+    xterm.loadAddon(xtermFitAddon);
+    xterm.open(container);
+    setTimeout(() => {
+      try {
+        xtermFitAddon.fit();
+      } catch {
+      }
+    }, 100);
+    connectTerminalWs();
+  }
+  function connectTerminalWs() {
+    if (!xterm) return;
+    const wsProtocol = location.protocol === "https:" ? "wss:" : "ws:";
+    xtermWs = new WebSocket(`${wsProtocol}//${location.host}/api/terminal`);
+    xtermWs.onopen = () => {
+      if (xtermFitAddon && xterm) {
+        const dims = xtermFitAddon.proposeDimensions();
+        if (dims) {
+          xtermWs?.send(JSON.stringify({ type: "resize", cols: dims.cols, rows: dims.rows }));
+        }
+      }
+    };
+    xtermWs.onmessage = (ev) => {
+      xterm?.write(ev.data);
+    };
+    xtermWs.onclose = () => {
+      xterm?.write("\r\n\x1B[90m\u2014 connection lost \u2014\x1B[0m\r\n");
+    };
+    xtermWs.onerror = () => {
+      xterm?.write("\r\n\x1B[31mTerminal connection error\x1B[0m\r\n");
+    };
+    xterm.onData((data) => {
+      if (xtermWs?.readyState === WebSocket.OPEN) {
+        xtermWs.send(data);
+      }
+    });
+  }
+  function setupTerminalTabs() {
+    const tabBtns = document.querySelectorAll(".terminal-tab-btn");
+    const xtermPanel = document.getElementById("terminal-xterm");
+    const outputPanel = document.getElementById("terminal-output");
+    tabBtns.forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const tab = btn.getAttribute("data-tab");
+        activeTerminalTab = tab;
+        tabBtns.forEach((b) => b.classList.toggle("active", b === btn));
+        if (xtermPanel) xtermPanel.style.display = tab === "terminal" ? "" : "none";
+        if (outputPanel) outputPanel.style.display = tab === "output" ? "" : "none";
+        if (tab === "terminal" && xtermFitAddon && xterm) {
+          setTimeout(() => {
+            try {
+              xtermFitAddon.fit();
+              const dims = xtermFitAddon.proposeDimensions();
+              if (dims && xtermWs?.readyState === WebSocket.OPEN) {
+                xtermWs.send(JSON.stringify({ type: "resize", cols: dims.cols, rows: dims.rows }));
+              }
+            } catch {
+            }
+          }, 50);
+        }
+      });
+    });
+    if (xtermPanel) {
+      new MutationObserver(() => {
+        if (xtermPanel.style.display !== "none" && xtermWs?.readyState !== WebSocket.OPEN) {
+          connectTerminalWs();
+        }
+      }).observe(xtermPanel, { attributes: true, attributeFilter: ["style"] });
+    }
+  }
   function init() {
     editor = window.setupMonaco(monacoContainer);
     terminal = new window.TerminalRenderer(terminalBody);
     terminal.sourceInfoMode = sourceInfoMode;
     bridge = new window.IframeBridge(iframeViewer);
+    initXterm();
+    setupTerminalTabs();
     setupMenuBar();
     setupSidebar();
     folderInput.addEventListener("change", handleFolderOpen);
     runBtn.addEventListener("click", handleRun);
     rebuildBtn.addEventListener("click", handleRebuild);
-    window.studio = { editor, bridge, terminal, currentFile: null };
+    window.studio = { editor, bridge, terminal, currentFile: null, openFile, jumpToLine };
     restoreWorkspace();
     loadPythonEnvironments();
     initSettings();
@@ -653,19 +768,6 @@
         localStorage.setItem("supergds-source-info", mode);
       });
     });
-    document.querySelectorAll(".terminal-tab-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const tab = btn.getAttribute("data-tab");
-        if (!tab) return;
-        document.querySelectorAll(".terminal-tab-btn").forEach((b) => {
-          b.classList.toggle("active", b.getAttribute("data-tab") === tab);
-        });
-        const sourcePanel = document.getElementById("terminal-source-panel");
-        const infoPanel = document.getElementById("terminal-info-panel");
-        if (sourcePanel) sourcePanel.style.display = tab === "source" ? "" : "none";
-        if (infoPanel) infoPanel.style.display = tab === "info" ? "" : "none";
-      });
-    });
     const saved = localStorage.getItem("supergds-source-info");
     if (saved) {
       sourceInfoMode = saved;
@@ -673,15 +775,6 @@
         opt.classList.toggle("active", opt.getAttribute("data-mode") === saved);
       });
     }
-    document.getElementById("terminal-source-panel")?.addEventListener("click", (e) => {
-      const target = e.target;
-      if (!target.classList.contains("source-jump")) return;
-      const file = target.getAttribute("data-file");
-      const line = target.getAttribute("data-line");
-      if (!file || !line) return;
-      console.log("[studio] jumpToSource click:", file, line);
-      window.postMessage({ type: "jumpToSource", file, line: parseInt(line, 10) }, "*");
-    });
   }
   init();
 })();

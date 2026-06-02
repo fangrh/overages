@@ -4,6 +4,7 @@
   var IframeBridge = class {
     iframe;
     ready = false;
+    currentComponents = [];
     pending = [];
     constructor(iframe) {
       this.iframe = iframe;
@@ -30,15 +31,21 @@
           }
           this.pending = [];
           break;
-        case "selectComponents":
-          this.updateTerminalPanels(msg.components);
+        case "selectComponents": {
+          const components = msg.components || [];
+          this.currentComponents = components;
           break;
+        }
         case "askClaude":
           this.handleAskClaude(msg.components, msg.question);
           break;
         case "jumpToSource":
           console.log("[iframeBridge] received jumpToSource:", msg.file, msg.line);
           this.jumpToSourceInEditor(msg.file, msg.line);
+          break;
+        case "requestSource":
+          console.log("[iframeBridge] received requestSource:", msg.file, msg.line);
+          this.handleRequestSource(msg.file, msg.line);
           break;
       }
     }
@@ -49,6 +56,14 @@
         return;
       }
       this.iframe.contentWindow?.postMessage(msg, "*");
+    }
+    sendSelectBySource(file, line) {
+      if (!this.ready) return;
+      this.iframe.contentWindow?.postMessage({
+        type: "selectBySource",
+        file,
+        line
+      }, "*");
     }
     forwardToEditor(components) {
       const studio = window.studio;
@@ -80,72 +95,28 @@
     handleAskClaude(components, question) {
       console.log("askClaude", components, question);
     }
-    updateTerminalPanels(components) {
-      const sourcePanel = document.getElementById("terminal-source-panel");
-      const infoPanel = document.getElementById("terminal-info-panel");
-      if (!sourcePanel || !infoPanel) return;
-      if (components.length === 0) {
-        sourcePanel.innerHTML = '<p class="placeholder">Click a polygon in the viewer to inspect source</p>';
-        infoPanel.innerHTML = '<p class="placeholder">Click a polygon in the viewer to inspect</p>';
-        return;
-      }
-      const comp = components[0];
-      const prov = comp.provenance || {};
-      infoPanel.innerHTML = "";
-      const addKV = (key, val) => {
-        const row = document.createElement("div");
-        row.className = "kv";
-        row.innerHTML = `<span class="key">${key}</span><span class="val">${val}</span>`;
-        infoPanel.appendChild(row);
-      };
-      addKV("layer", comp.layer || "?");
-      if (prov.instance_name) addKV("instance", prov.instance_name);
-      if (prov.cell) addKV("cell", prov.cell);
-      if (prov.file) {
-        let fileLabel = prov.file + ":" + (prov.line ?? "?");
-        if (prov.array_index?.length) fileLabel += ` (array index [${prov.array_index.join(", ")}])`;
-        if (prov.loop_index?.length) fileLabel += ` (loop index [${prov.loop_index.join(", ")}])`;
-        addKV("file", fileLabel);
-      }
-      if (prov.function && prov.function !== "<module>") addKV("function", prov.function + "()");
-      if (prov.class_name) addKV("class", prov.class_name);
-      if (prov.file) {
-        sourcePanel.innerHTML = "";
-        const files = /* @__PURE__ */ new Map();
-        const fp = prov.file.replace(/\\/g, "/");
-        const entry = { line: typeof prov.line === "number" ? prov.line : parseInt(String(prov.line)) || 0 };
-        if (prov.loop_index) entry.loop_index = prov.loop_index;
-        if (prov.array_index) entry.array_index = prov.array_index;
-        files.set(fp, [entry]);
-        const chain = prov.call_chain || [];
-        for (const cc of chain) {
-          if (cc.file) {
-            const cfp = cc.file.replace(/\\/g, "/");
-            const cl = typeof cc.line === "number" ? cc.line : parseInt(String(cc.line)) || 0;
-            if (!files.has(cfp)) files.set(cfp, []);
-            const existing = files.get(cfp);
-            if (!existing.some((e) => e.line === cl)) existing.push({ line: cl });
+    async handleRequestSource(file, line) {
+      const studio = window.studio;
+      if (!studio) return;
+      const targetBasename = file.replace(/\\/g, "/").split("/").pop() ?? "";
+      const openBasename = studio.currentFile?.replace(/\\/g, "/").split("/").pop() ?? "";
+      if (openBasename !== targetBasename) {
+        try {
+          const res = await fetch("/api/files");
+          if (!res.ok) return;
+          const { files } = await res.json();
+          const match = files.find((f) => f.replace(/\\/g, "/").split("/").pop() === targetBasename);
+          if (match && studio.openFile) {
+            await studio.openFile(match);
+          } else {
+            return;
           }
+        } catch {
+          return;
         }
-        for (const [file, entries] of files) {
-          for (const entry2 of entries) {
-            const div = document.createElement("div");
-            div.className = "kv";
-            let label = `@${file}:${entry2.line}`;
-            if (entry2.loop_index) label += ` (loop [${entry2.loop_index.join(", ")}])`;
-            if (entry2.array_index) label += ` (array [${entry2.array_index.join(", ")}])`;
-            const sourceSpan = document.createElement("span");
-            sourceSpan.className = "val clickable source-jump";
-            sourceSpan.setAttribute("data-file", file);
-            sourceSpan.setAttribute("data-line", String(entry2.line));
-            sourceSpan.textContent = label;
-            div.innerHTML = '<span class="key">source</span>';
-            div.appendChild(sourceSpan);
-            sourcePanel.appendChild(div);
-          }
-        }
-      } else {
-        sourcePanel.innerHTML = '<p class="placeholder">No provenance data in this GDS file.</p>';
+      }
+      if (studio.jumpToLine) {
+        studio.jumpToLine(line);
       }
     }
     jumpToSourceInEditor(file, line) {

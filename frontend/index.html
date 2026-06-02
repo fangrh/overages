@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>superGDS Studio</title>
 <link rel="stylesheet" href="/studio.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm/css/xterm.css">
 </head>
 <body>
 <!-- Left: Activity Bar + Sidebar -->
@@ -105,10 +106,9 @@
     <!-- Terminal -->
     <div id="terminal">
       <div id="terminal-header">
-        <span>Terminal</span>
-        <span style="display:flex;align-items:center;gap:2px;margin-left:12px;">
-          <span class="terminal-tab-btn active" data-tab="source" id="terminal-tab-source">Source</span>
-          <span class="terminal-tab-btn" data-tab="info" id="terminal-tab-info">Info</span>
+        <span style="display:flex;align-items:center;gap:2px;">
+          <span class="terminal-tab-btn active" data-tab="terminal">Terminal</span>
+          <span class="terminal-tab-btn" data-tab="output">Output</span>
         </span>
         <div style="flex: 1;"></div>
         <span id="terminal-settings" class="terminal-settings-btn" title="Terminal Settings">⚙</span>
@@ -124,10 +124,8 @@
           </div>
         </div>
       </div>
-      <div id="terminal-body">
-        <div id="terminal-source-panel" class="terminal-tab-panel active"><p class="placeholder">Click a polygon in the viewer to inspect source</p></div>
-        <div id="terminal-info-panel" class="terminal-tab-panel" style="display:none;"><p class="placeholder">Click a polygon in the viewer to inspect</p></div>
-      </div>
+      <div id="terminal-xterm" class="terminal-tab-panel active"></div>
+      <div id="terminal-output" class="terminal-tab-panel" style="display:none;"></div>
     </div>
   </div>
 </div>
@@ -137,29 +135,45 @@
 
 <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.55.1/min/vs/loader.js"></script>
 <script>
-  require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.55.1/min/vs' } });
-  require(['vs/editor/editor.main'], function() {
-    window.monaco = monaco;
-    // Load all chunks sequentially to ensure window globals are set before init()
-    var s1 = document.createElement('script');
-    s1.src = '/monacoSetup.js';
-    s1.onload = function() {
-      var s2 = document.createElement('script');
-      s2.src = '/terminal.js';
-      s2.onload = function() {
-        var s3 = document.createElement('script');
-        s3.src = '/iframeBridge.js';
-        s3.onload = function() {
-          var s4 = document.createElement('script');
-          s4.src = '/studio.js';
-          document.body.appendChild(s4);
-        };
-        document.body.appendChild(s3);
-      };
-      document.body.appendChild(s2);
+  // Load xterm.js from CDN and expose as window.xtermLib
+  var xtermScript = document.createElement('script');
+  xtermScript.src = 'https://cdn.jsdelivr.net/npm/@xterm/xterm/lib/xterm.js';
+  xtermScript.onload = function() {
+    var fitScript = document.createElement('script');
+    fitScript.src = 'https://cdn.jsdelivr.net/npm/@xterm/addon-fit/lib/addon-fit.js';
+    fitScript.onload = function() {
+      // Expose as global for studio.ts to use
+      window.xtermLib = { Terminal: window.Terminal, FitAddon: window.FitAddon };
+      loadMonaco();
     };
-    document.head.appendChild(s1);
-  });
+    document.head.appendChild(fitScript);
+  };
+  document.head.appendChild(xtermScript);
+
+  function loadMonaco() {
+    require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.55.1/min/vs' } });
+    require(['vs/editor/editor.main'], function() {
+      window.monaco = monaco;
+      var s1 = document.createElement('script');
+      s1.src = '/monacoSetup.js';
+      s1.onload = function() {
+        var s2 = document.createElement('script');
+        s2.src = '/terminal.js';
+        s2.onload = function() {
+          var s3 = document.createElement('script');
+          s3.src = '/iframeBridge.js';
+          s3.onload = function() {
+            var s4 = document.createElement('script');
+            s4.src = '/studio.js';
+            document.body.appendChild(s4);
+          };
+          document.body.appendChild(s3);
+        };
+        document.body.appendChild(s2);
+      };
+      document.head.appendChild(s1);
+    });
+  }
 </script>
 </body>
 </html>
