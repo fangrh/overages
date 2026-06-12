@@ -42,5 +42,5 @@ app.listen({ port: PORT }, (err, addr) => {
     app.log.error(err);
     process.exit(1);
   }
-  console.log(`superGDS Studio running at http://localhost:${PORT}`);
+  console.log(`overGDS Studio running at http://localhost:${PORT}`);
 });
