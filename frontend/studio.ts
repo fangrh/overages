@@ -386,6 +386,13 @@ async function openFile(filePath: string) {
   // Track current file for jump-to-source
   (window as any).studio.currentFile = filePath;
 
+  // Push open file state to server for MCP server to read
+  fetch('/api/ide-state', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type: 'openFile', file: filePath }),
+  }).catch(() => {});
+
   runBtn.disabled = false;
   rebuildBtn.disabled = false;
 }
@@ -731,6 +738,21 @@ async function handleRun() {
     }
     terminal.addLine('system', 'Done.');
     es.close();
+    // Push build status to server state for MCP server to read
+    fetch('/api/ide-state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'build',
+        status: {
+          lastOutput: 'Done.',
+          exitCode: 0,
+          gdsPath: data.gdsPath || null,
+          errors: [],
+          timestamp: Date.now(),
+        },
+      }),
+    }).catch(() => {});
   });
   es.addEventListener('error', (e: Event) => {
     if (completed) return;
@@ -742,6 +764,21 @@ async function handleRun() {
       terminal.addLine('stderr', 'Run failed — connection lost.');
     }
     es.close();
+    // Push build error status to server state
+    fetch('/api/ide-state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'build',
+        status: {
+          lastOutput: msg ? String(msg) : 'Run failed — connection lost.',
+          exitCode: 1,
+          gdsPath: null,
+          errors: [msg ? String(msg) : 'Run failed'],
+          timestamp: Date.now(),
+        },
+      }),
+    }).catch(() => {});
   });
 }
 
@@ -863,6 +900,30 @@ function setupTerminalTabs(): void {
   }
 }
 
+// Poll for pending commands from MCP server (highlight source, select by source)
+let lastCommandPoll = 0;
+function pollMcpCommands() {
+  // Poll every 1 second — commands are rare, this is lightweight
+  const now = Date.now();
+  if (now - lastCommandPoll < 1000) return;
+  lastCommandPoll = now;
+
+  fetch('/api/ide-state/commands')
+    .then(res => res.ok ? res.json() : { commands: [] })
+    .then(({ commands }: { commands: Array<{ type: string; file: string; line: number }> }) => {
+      for (const cmd of commands) {
+        if (cmd.type === 'highlightSource') {
+          // Highlight source line in Monaco
+          jumpToLine(cmd.line);
+        } else if (cmd.type === 'selectBySource') {
+          // Select polygons in viewer corresponding to source location
+          bridge?.sendSelectBySource(cmd.file, cmd.line);
+        }
+      }
+    })
+    .catch(() => {});
+}
+
 export function init() {
   // @ts-ignore - these are set by other chunks loaded via script tags
   editor = (window as any).setupMonaco(monacoContainer);
@@ -896,6 +957,9 @@ export function init() {
 
   // Initialize terminal settings
   initSettings();
+
+  // Start polling for MCP commands (highlight, select) from Claude Code
+  setInterval(pollMcpCommands, 1000);
 
   // Restore layout mode from sessionStorage
   const savedLayout = sessionStorage.getItem('supergds-layout') as LayoutMode | null;

@@ -55,6 +55,13 @@ export class IframeBridge {
       case 'selectComponents': {
         const components = msg.components || [];
         this.currentComponents = components;
+        // Push selection to server state for MCP server to read
+        fetch('/api/ide-state', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'selection', components }),
+        }).catch(() => {});
+        this.forwardToEditor(components);
         break;
       }
       case 'askClaude':
@@ -136,7 +143,12 @@ export class IframeBridge {
   }
 
   private handleAskClaude(components: ComponentSelection[], question: string): void {
-    console.log('askClaude', components, question);
+    // Post question + components to server state for Claude Code to pick up via MCP
+    fetch('/api/ide-state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'askClaude', components, question }),
+    }).catch(() => {});
   }
 
   private async handleRequestSource(file: string, line: number): Promise<void> {

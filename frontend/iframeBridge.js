@@ -34,6 +34,13 @@
         case "selectComponents": {
           const components = msg.components || [];
           this.currentComponents = components;
+          fetch("/api/ide-state", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ type: "selection", components })
+          }).catch(() => {
+          });
+          this.forwardToEditor(components);
           break;
         }
         case "askClaude":
@@ -93,7 +100,12 @@
       editor.deltaDecorations([], decorations);
     }
     handleAskClaude(components, question) {
-      console.log("askClaude", components, question);
+      fetch("/api/ide-state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "askClaude", components, question })
+      }).catch(() => {
+      });
     }
     async handleRequestSource(file, line) {
       const studio = window.studio;

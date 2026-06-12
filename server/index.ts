@@ -9,6 +9,7 @@ import { registerParseRoutes } from './parseRoutes.js';
 import { registerAnnotationRoutes } from './annotationRoutes.js';
 import { registerEnvRoutes } from './envRoutes.js';
 import { registerTerminalRoutes } from './terminalRoutes.js';
+import { registerStateRoutes } from './stateRoutes.js';
 
 const PORT = 3000;
 
@@ -27,6 +28,7 @@ await registerRunRoutes(app);
 await registerParseRoutes(app);
 await registerAnnotationRoutes(app);
 await registerEnvRoutes(app);
+await registerStateRoutes(app);
 
 await app.register(fastifyStatic, {
   root: path.join(process.cwd(), 'frontend'),

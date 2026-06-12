@@ -288,6 +288,12 @@
     const { content } = await res.json();
     editor.setValue(content);
     window.studio.currentFile = filePath;
+    fetch("/api/ide-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "openFile", file: filePath })
+    }).catch(() => {
+    });
     runBtn.disabled = false;
     rebuildBtn.disabled = false;
   }
@@ -542,6 +548,21 @@
       }
       terminal.addLine("system", "Done.");
       es.close();
+      fetch("/api/ide-state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "build",
+          status: {
+            lastOutput: "Done.",
+            exitCode: 0,
+            gdsPath: data.gdsPath || null,
+            errors: [],
+            timestamp: Date.now()
+          }
+        })
+      }).catch(() => {
+      });
     });
     es.addEventListener("error", (e) => {
       if (completed) return;
@@ -556,6 +577,21 @@
         terminal.addLine("stderr", "Run failed \u2014 connection lost.");
       }
       es.close();
+      fetch("/api/ide-state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "build",
+          status: {
+            lastOutput: msg ? String(msg) : "Run failed \u2014 connection lost.",
+            exitCode: 1,
+            gdsPath: null,
+            errors: [msg ? String(msg) : "Run failed"],
+            timestamp: Date.now()
+          }
+        })
+      }).catch(() => {
+      });
     });
   }
   async function handleRebuild() {
@@ -649,6 +685,22 @@
       }).observe(xtermPanel, { attributes: true, attributeFilter: ["style"] });
     }
   }
+  var lastCommandPoll = 0;
+  function pollMcpCommands() {
+    const now = Date.now();
+    if (now - lastCommandPoll < 1e3) return;
+    lastCommandPoll = now;
+    fetch("/api/ide-state/commands").then((res) => res.ok ? res.json() : { commands: [] }).then(({ commands }) => {
+      for (const cmd of commands) {
+        if (cmd.type === "highlightSource") {
+          jumpToLine(cmd.line);
+        } else if (cmd.type === "selectBySource") {
+          bridge?.sendSelectBySource(cmd.file, cmd.line);
+        }
+      }
+    }).catch(() => {
+    });
+  }
   function init() {
     editor = window.setupMonaco(monacoContainer);
     terminal = new window.TerminalRenderer(terminalBody);
@@ -665,6 +717,7 @@
     restoreWorkspace();
     loadPythonEnvironments();
     initSettings();
+    setInterval(pollMcpCommands, 1e3);
     const savedLayout = sessionStorage.getItem("supergds-layout");
     setLayoutMode(savedLayout || "split");
     if (layoutBtn) {

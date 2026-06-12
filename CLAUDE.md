@@ -41,3 +41,35 @@ This project is indexed by GitNexus as **overages** (844 symbols, 1149 relations
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+## superGDS MCP — AI Agent Context
+
+When the user asks about a GDS layout component, what they are looking at, or wants to modify the layout:
+
+1. **Call `get_selected_components`** to get provenance data (file, line, function, call chain) for whatever polygon they clicked.
+2. **Call `get_open_file`** to see what code is currently open in the editor.
+3. **Call `get_build_status`** to check the last run's output and any errors.
+4. Use provenance to understand which code generated the component they're asking about — then edit the Python script at that exact location.
+
+When modifying a layout:
+1. Use provenance from `get_selected_components` to find the exact code location.
+2. Edit the Python script.
+3. **Call `run_script`** to rebuild the layout with provenance tracking.
+4. **Call `highlight_source`** to show the user which line changed in the editor.
+5. **Call `select_by_source`** to highlight the affected polygons in the viewer.
+
+The viewer has an "Ask Claude" panel that submits questions via `askClaude`. When the user seems to be asking about the layout, check `get_pending_question` for viewer-submitted questions.
+
+### MCP Server Setup
+
+The MCP server connects Claude Code to the superGDS Studio IDE state:
+
+```bash
+# One-time setup — add the MCP server to Claude Code
+claude mcp add supergds -- node --import tsx/esm mcp/supergds-mcp.ts
+
+# Or use the npm script
+claude mcp add supergds -- npm run mcp
+```
+
+The server reads IDE state from `http://localhost:3000/api/ide-state` (the Express server must be running).
