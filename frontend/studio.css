@@ -610,22 +610,44 @@ body {
 #terminal-header span { font-size: 12px; font-weight: 600; color: #89b4fa; }
 #terminal-header button { font-size: 11px; padding: 2px 8px; background: #45475a; border-radius: 3px; cursor: pointer; border: none; color: #cdd6f4; }
 
-/* Terminal tab buttons */
-.terminal-tab-btn {
+/* Generic panel tab buttons (used by TabManager — main panel & viewer console) */
+.panel-tab-btn {
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 4px 4px 0 0;
   cursor: pointer;
   color: #6c7086;
   border-bottom: 2px solid transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  user-select: none;
 }
-.terminal-tab-btn.active {
+.panel-tab-btn.active {
   color: #89b4fa;
   border-bottom-color: #89b4fa;
 }
-.terminal-tab-btn:hover { color: #cdd6f4; }
+.panel-tab-btn:hover { color: #cdd6f4; }
 
-/* Terminal tab panels */
+/* Close button inside a tab */
+.panel-tab-close {
+  font-size: 13px;
+  line-height: 1;
+  color: #6c7086;
+  margin-left: 2px;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+.panel-tab-close:hover {
+  color: #f38ba8;
+  background: rgba(243, 139, 168, 0.15);
+}
+
+/* Legacy aliases — keep for any inline references */
+.terminal-tab-btn { }
+.tab-btn { }
+
+/* Terminal tab panels — generic container for TabManager */
 .terminal-tab-panel {
   flex: 1;
   overflow-y: auto;
@@ -644,28 +666,29 @@ body {
   padding: 8px 12px;
 }
 
-.terminal-tab-panel .placeholder { color: #585b70; font-size: 12px; }
+/* Problems panel */
+#terminal-problems {
+  padding: 8px 12px;
+}
+
+.terminal-tab-panel .placeholder { color: #585b70; font-size: 12px; font-style: italic; padding: 20px 0; text-align: center; }
 .terminal-tab-panel .kv { display: flex; gap: 8px; padding: 1px 0; }
 .terminal-tab-panel .kv .key { color: #6c7086; min-width: 90px; flex-shrink: 0; text-align: right; }
 .terminal-tab-panel .kv .val { color: #cdd6f4; }
 
+/* Terminal body — TabManager's panel container */
 #terminal-body {
   flex: 1;
-  overflow-y: auto;
-  padding: 8px 12px;
-  font: 13px/1.5 'Cascadia Code', 'Fira Code', monospace;
-  color: #cdd6f4;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
-#terminal-body .stdout { color: #cdd6f4; }
-#terminal-body .stderr { color: #f38ba8; }
-#terminal-body .system { color: #6c7086; font-style: italic; }
-#terminal-body .timestamp { font-size: 11px; }
-
-#terminal-output .stdout { color: #cdd6f4; }
-#terminal-output .stderr { color: #f38ba8; }
-#terminal-output .system { color: #6c7086; font-style: italic; }
-#terminal-output .timestamp { font-size: 11px; }
+/* Log line colours (shared across Output and Problems panels) */
+.terminal-tab-panel .stdout { color: #cdd6f4; }
+.terminal-tab-panel .stderr { color: #f38ba8; }
+.terminal-tab-panel .system { color: #6c7086; font-style: italic; }
+.terminal-tab-panel .timestamp { font-size: 11px; }
 
 .source-highlight { background: rgba(137, 180, 250, 0.15) !important; }
 .source-glyph { background: #89b4fa; width: 4px !important; margin-left: 3px; }

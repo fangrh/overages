@@ -33,7 +33,8 @@ let workspacePath: string | null = null;
 let xterm: any = null;
 let xtermFitAddon: any = null;
 let xtermWs: WebSocket | null = null;
-let activeTerminalTab: 'terminal' | 'output' = 'terminal';
+let activeTerminalTab: string = 'terminal';
+let tabManager: any = null; // TabManager instance for bottom panel
 
 class ResizeHandle {
   private handle: HTMLElement;
@@ -809,7 +810,7 @@ function initXterm(): void {
   // Dynamically import xterm from the CDN-loaded global (or bundled)
   // xterm is loaded via CDN in index.html
   const xtermLib = (window as any).xtermLib;
-  if (!xtermLib) return;
+  if (!xtermLib || typeof xtermLib.Terminal !== 'function') return;
 
   xterm = new xtermLib.Terminal({
     cursorBlink: true,
@@ -871,26 +872,28 @@ function connectTerminalWs(): void {
   });
 }
 
-function setupTerminalTabs(): void {
-  const tabBtns = document.querySelectorAll('.terminal-tab-btn');
-  const xtermPanel = document.getElementById('terminal-xterm');
-  const outputPanel = document.getElementById('terminal-output');
+function setupBottomPanel(): void {
+  const TabManagerClass = (window as any).TabManager;
+  if (!TabManagerClass) {
+    console.error('TabManager not loaded');
+    return;
+  }
 
-  tabBtns.forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const tab = (btn as HTMLElement).getAttribute('data-tab') as 'terminal' | 'output';
-      activeTerminalTab = tab;
+  const xtermPanel = document.getElementById('terminal-xterm')!;
+  const outputPanel = document.getElementById('terminal-output')!;
+  const problemsPanel = document.getElementById('terminal-problems')!;
 
-      // Update active button
-      tabBtns.forEach(b => b.classList.toggle('active', b === btn));
+  // Initialize problems panel with placeholder
+  problemsPanel.innerHTML = '<p class="placeholder">No problems detected.</p>';
 
-      // Show/hide panels
-      if (xtermPanel) xtermPanel.style.display = tab === 'terminal' ? '' : 'none';
-      if (outputPanel) outputPanel.style.display = tab === 'output' ? '' : 'none';
+  tabManager = new TabManagerClass('terminal-header', 'terminal-body');
 
-      // Refit xterm when switching back to terminal tab
-      if (tab === 'terminal' && xtermFitAddon && xterm) {
+  // Terminal tab — with xterm refit on activate
+  tabManager.addTab('terminal', 'Terminal', xtermPanel, {
+    active: true,
+    onActivate: () => {
+      activeTerminalTab = 'terminal';
+      if (xtermFitAddon && xterm) {
         setTimeout(() => {
           try {
             xtermFitAddon.fit();
@@ -901,17 +904,25 @@ function setupTerminalTabs(): void {
           } catch {}
         }, 50);
       }
-    });
+    },
   });
 
-  // Reconnect terminal when clicking the Terminal tab
-  if (xtermPanel) {
-    new MutationObserver(() => {
-      if (xtermPanel.style.display !== 'none' && xtermWs?.readyState !== WebSocket.OPEN) {
-        connectTerminalWs();
-      }
-    }).observe(xtermPanel, { attributes: true, attributeFilter: ['style'] });
-  }
+  // Output tab — build/run logs
+  tabManager.addTab('output', 'Output', outputPanel, {
+    onActivate: () => { activeTerminalTab = 'output'; },
+  });
+
+  // Problems tab — placeholder for future diagnostics
+  tabManager.addTab('problems', 'Problems', problemsPanel, {
+    onActivate: () => { activeTerminalTab = 'problems'; },
+  });
+
+  // Reconnect terminal when the xterm panel becomes visible
+  new MutationObserver(() => {
+    if (xtermPanel.style.display !== 'none' && xtermWs?.readyState !== WebSocket.OPEN) {
+      connectTerminalWs();
+    }
+  }).observe(xtermPanel, { attributes: true, attributeFilter: ['style'] });
 }
 
 // Poll for pending commands from MCP server (highlight source, select by source)
@@ -947,9 +958,9 @@ export function init() {
   // @ts-ignore
   bridge = new (window as any).IframeBridge(iframeViewer);
 
-  // Initialize xterm.js terminal
-  initXterm();
-  setupTerminalTabs();
+  // Initialize xterm.js terminal (non-fatal — app works without it)
+  try { initXterm(); } catch (e) { console.error('xterm init failed:', e); }
+  setupBottomPanel();
 
   // Setup UI
   setupMenuBar();

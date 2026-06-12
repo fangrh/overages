@@ -106,10 +106,7 @@
     <!-- Terminal -->
     <div id="terminal">
       <div id="terminal-header">
-        <span style="display:flex;align-items:center;gap:2px;">
-          <span class="terminal-tab-btn active" data-tab="terminal">Terminal</span>
-          <span class="terminal-tab-btn" data-tab="output">Output</span>
-        </span>
+        <span class="tab-bar" style="display:flex;align-items:center;gap:2px;"></span>
         <div style="flex: 1;"></div>
         <span id="terminal-settings" class="terminal-settings-btn" title="Terminal Settings">⚙</span>
         <div id="terminal-settings-dropdown" class="hidden">
@@ -124,8 +121,11 @@
           </div>
         </div>
       </div>
-      <div id="terminal-xterm" class="terminal-tab-panel active"></div>
-      <div id="terminal-output" class="terminal-tab-panel" style="display:none;"></div>
+      <div id="terminal-body">
+        <div id="terminal-xterm" class="terminal-tab-panel"></div>
+        <div id="terminal-output" class="terminal-tab-panel"></div>
+        <div id="terminal-problems" class="terminal-tab-panel"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -157,19 +157,24 @@
       var s1 = document.createElement('script');
       s1.src = '/monacoSetup.js';
       s1.onload = function() {
-        var s2 = document.createElement('script');
-        s2.src = '/terminal.js';
-        s2.onload = function() {
-          var s3 = document.createElement('script');
-          s3.src = '/iframeBridge.js';
-          s3.onload = function() {
-            var s4 = document.createElement('script');
-            s4.src = '/studio.js';
-            document.body.appendChild(s4);
+        var sTm = document.createElement('script');
+        sTm.src = '/tabManager.js';
+        sTm.onload = function() {
+          var s2 = document.createElement('script');
+          s2.src = '/terminal.js';
+          s2.onload = function() {
+            var s3 = document.createElement('script');
+            s3.src = '/iframeBridge.js';
+            s3.onload = function() {
+              var s4 = document.createElement('script');
+              s4.src = '/studio.js';
+              document.body.appendChild(s4);
+            };
+            document.body.appendChild(s3);
           };
-          document.body.appendChild(s3);
+          document.body.appendChild(s2);
         };
-        document.body.appendChild(s2);
+        document.body.appendChild(sTm);
       };
       document.head.appendChild(s1);
     });
