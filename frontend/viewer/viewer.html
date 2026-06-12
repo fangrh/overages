@@ -281,89 +281,129 @@ function clearSelection() {
     onSelectionChanged();
 }
 
-// Progressive Ctrl+A selection:
-//   0 → 1: select all elements of the same placement (instance_name + file + line)
-//           If no instance_name, skip to L2.
-//   1 → 2: expand to same for-loop iteration (file + placement_line + loop_index)
-//   2 → 0: clear selection
+// Progressive Ctrl+A selection (narrow → broad):
+//   L1 (0→1): select same logical instance (narrow)
+//     - loop components: same instance_name + file + line + loop_index (one iteration)
+//     - array components: same instance_name + file + line + array_index (one cell)
+//     - plain components: same instance_name + file + line
+//     - If no expansion, skip to L2.
+//   L2 (1→2): expand to all instances from same placement (broad)
+//     - Same instance_name + file + line (all iterations / all array elements)
+//     - If no expansion, skip to clear.
+//   Clear (2→0): reset selection
 function handleCtrlA() {
     var features = selectedFeatures.getArray();
 
     if (selectionCycle === 0) {
-        // L1: group by instance_name + file + line (one add_ref call)
+        // L1: select same logical instance (narrow) — one iteration or one array cell
         if (features.length === 0) return;
         var anchor = features[0];
         var prov = anchor.get('provenance') || {};
         var groupInst = prov.instance_name || '';
         var groupFile = (prov.file || '').replace(/\\/g, '/');
         var groupLine = prov.line;
+        var groupLoopIdx = prov.loop_index;
+        var groupArrayIdx = prov.array_index;
 
-        // If no instance_name, skip L1 and go straight to L2
-        if (!groupInst) {
-            selectionCycle = 1;
-            handleCtrlA();
-            return;
+        var hasLoopIdx = groupLoopIdx !== undefined && groupLoopIdx !== null;
+        var hasArrayIdx = groupArrayIdx !== undefined && groupArrayIdx !== null;
+
+        // Helper: check if two index arrays match
+        function indexMatch(a, b) {
+            if (!a || !b) return false;
+            if (a.length !== b.length) return false;
+            for (var k = 0; k < a.length; k++) { if (a[k] !== b[k]) return false; }
+            return true;
         }
 
         var sameInstance = allFeatures.filter(function(f) {
             var fProv = f.get('provenance') || {};
-            if ((fProv.instance_name || '') !== groupInst) return false;
-            if ((fProv.file || '').replace(/\\/g, '/') !== groupFile) return false;
-            if (fProv.line !== groupLine) return false;
+
+            if (groupInst) {
+                if ((fProv.instance_name || '') !== groupInst) return false;
+                if ((fProv.file || '').replace(/\\/g, '/') !== groupFile) return false;
+                if (fProv.line !== groupLine) return false;
+            } else {
+                // No instance_name: match by file + line
+                if ((fProv.file || '').replace(/\\/g, '/') !== groupFile) return false;
+                if (fProv.line !== groupLine) return false;
+            }
+
+            // For loop components: require same loop_index (same iteration)
+            if (hasLoopIdx) {
+                if (!indexMatch(groupLoopIdx, fProv.loop_index)) return false;
+            }
+
+            // For array components (without loop): require same array_index (same cell)
+            if (!hasLoopIdx && hasArrayIdx) {
+                if (!indexMatch(groupArrayIdx, fProv.array_index)) return false;
+            }
+
             return true;
         });
+
         // If L1 didn't expand beyond current selection, skip to L2
         if (sameInstance.length <= features.length) {
             selectionCycle = 1;
             handleCtrlA();
             return;
         }
+
         replaceSelection(sameInstance);
         selectionCycle = 1;
         rewriteLabels('[:]');
         var cycleEl = document.getElementById('cycle-indicator');
-        if (cycleEl) { cycleEl.textContent = 'L1: same placement  Ctrl+A→L2'; cycleEl.style.display = 'block'; }
+        var levelLabel = 'L1: same placement';
+        if (hasLoopIdx) levelLabel = 'L1: same iteration';
+        else if (hasArrayIdx) levelLabel = 'L1: same element';
+        if (cycleEl) { cycleEl.textContent = levelLabel + '  Ctrl+A→L2'; cycleEl.style.display = 'block'; }
 
     } else if (selectionCycle === 1) {
-        // L2: expand to same for-loop iteration.
-        // Group by file + placement_line + loop_index (same source line, same loop iteration).
-        // If no loop_index, this matches all features from the same placement_line.
+        // L2: expand to all instances from same placement (broad — all iterations / all array elements)
         var anchor = selectedFeatures.getArray()[0];
         var prov = anchor ? anchor.get('provenance') || {} : {};
-        var anchorFile = (prov.file || '').replace(/\\/g, '/');
-        var anchorPLine = prov.placement_line;
-        var anchorLoopIdx = prov.loop_index;
+        var groupInst = prov.instance_name || '';
+        var groupFile = (prov.file || '').replace(/\\/g, '/');
+        var groupLine = prov.line;
 
-        var sameLoop = allFeatures.filter(function(f) {
-            var fProv = f.get('provenance') || {};
-            var fFile = (fProv.file || '').replace(/\\/g, '/');
-            if (fFile !== anchorFile) return false;
+        var allSamePlacement;
+        if (groupInst) {
+            allSamePlacement = allFeatures.filter(function(f) {
+                var fProv = f.get('provenance') || {};
+                if ((fProv.instance_name || '') !== groupInst) return false;
+                if ((fProv.file || '').replace(/\\/g, '/') !== groupFile) return false;
+                if (fProv.line !== groupLine) return false;
+                return true;
+            });
+        } else {
+            // No instance_name: group by file + placement_line
+            var anchorPLine = prov.placement_line;
+            allSamePlacement = allFeatures.filter(function(f) {
+                var fProv = f.get('provenance') || {};
+                var fFile = (fProv.file || '').replace(/\\/g, '/');
+                if (fFile !== groupFile) return false;
+                var fPLine = fProv.placement_line;
+                if (anchorPLine !== undefined && fPLine !== anchorPLine) return false;
+                if (anchorPLine === undefined && fPLine !== undefined) return false;
+                return true;
+            });
+        }
 
-            // Match same placement_line (or both undefined)
-            var fPLine = fProv.placement_line;
-            if (anchorPLine !== undefined && fPLine !== anchorPLine) return false;
-            if (anchorPLine === undefined && fPLine !== undefined) return false;
+        // If L2 didn't expand beyond L1, skip to clear
+        if (allSamePlacement.length <= features.length) {
+            selectionCycle = 2;
+            handleCtrlA();
+            return;
+        }
 
-            // If anchor has loop_index, also require same loop_index
-            if (anchorLoopIdx !== undefined && anchorLoopIdx !== null) {
-                var fLoopIdx = fProv.loop_index;
-                if (fLoopIdx === undefined || fLoopIdx === null) return false;
-                if (anchorLoopIdx.length !== fLoopIdx.length) return false;
-                for (var i = 0; i < anchorLoopIdx.length; i++) {
-                    if (anchorLoopIdx[i] !== fLoopIdx[i]) return false;
-                }
-            }
-
-            return true;
-        });
-        replaceSelection(sameLoop);
+        replaceSelection(allSamePlacement);
         selectionCycle = 2;
         rewriteLabels('[:]');
         var cycleEl = document.getElementById('cycle-indicator');
-        if (cycleEl) { cycleEl.textContent = 'L2: same loop iteration  Ctrl+A→clear'; cycleEl.style.display = 'block'; }
+        if (cycleEl) { cycleEl.textContent = 'L2: all instances  Ctrl+A→clear'; cycleEl.style.display = 'block'; }
 
     } else {
-        // Cycle complete: clear and reset
+        // Clear and reset
         rewriteLabels('');
         clearSelection();
         selectionCycle = 0;
@@ -731,45 +771,6 @@ function updateMultiSourcePanel(fileMap, features) {
         });
     })();
 
-    // When grouped (Ctrl+A), compute array_index and loop_index ranges across all features
-    var arrayRangeLabel = '';
-    var loopRangeLabel = '';
-    if (isGroupedSelection && features.length > 1) {
-        // Collect all unique array_index values and compute range
-        var allArrayIndices = [];
-        var allLoopIndices = [];
-        features.forEach(function(f) {
-            var p = f.get('provenance') || {};
-            if (p.array_index && p.array_index.length > 0) {
-                allArrayIndices.push(p.array_index);
-            }
-            if (p.loop_index && p.loop_index.length > 0) {
-                allLoopIndices.push(p.loop_index);
-            }
-        });
-        if (allArrayIndices.length > 1) {
-            // Show range like "array [0,0]..[2,1] (6 elements)"
-            var minIdx = allArrayIndices.reduce(function(a, b) { return a < b ? a : b; });
-            var maxIdx = allArrayIndices.reduce(function(a, b) { return a > b ? a : b; });
-            var minStr = '[' + minIdx.join(', ') + ']';
-            var maxStr = '[' + maxIdx.join(', ') + ']';
-            arrayRangeLabel = minStr === maxStr ? 'array ' + minStr : 'array ' + minStr + '..' + maxStr + ' (' + allArrayIndices.length + ')';
-        }
-        if (allLoopIndices.length > 0) {
-            var uniqueLoopVals = [];
-            var seenLoop = {};
-            allLoopIndices.forEach(function(li) {
-                var key = li.join(',');
-                if (!seenLoop[key]) { seenLoop[key] = true; uniqueLoopVals.push(li); }
-            });
-            if (uniqueLoopVals.length === 1) {
-                loopRangeLabel = 'loop [' + uniqueLoopVals[0].join(', ') + ']';
-            } else {
-                loopRangeLabel = uniqueLoopVals.length + ' loop iterations';
-            }
-        }
-    }
-
     // Show numbered component list with full provenance, one line per source location
     if (features && features.length > 0) {
         // When grouped, show a single summary line instead of per-element list
@@ -779,8 +780,6 @@ function updateMultiSourcePanel(fileMap, features) {
             var summaryLine = firstProv.line ? parseInt(firstProv.line) : null;
             if (summaryFile) {
                 var summaryLabel = features.length + ' elements';
-                if (arrayRangeLabel) summaryLabel += ' | ' + arrayRangeLabel;
-                if (loopRangeLabel) summaryLabel += ' | ' + loopRangeLabel;
 
                 var summaryDiv = document.createElement('div');
                 summaryDiv.className = 'kv';
