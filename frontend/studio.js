@@ -10,6 +10,7 @@
   var xtermFitAddon = null;
   var xtermWs = null;
   var activeTerminalTab = "terminal";
+  var tabManager = null;
   var ResizeHandle = class {
     handle;
     editorPane;
@@ -163,6 +164,72 @@
       terminal.addLine("system", `Select a folder using the dialog...`);
       folderInput.click();
     });
+    loadRecentWorkspaces();
+  }
+  async function loadRecentWorkspaces() {
+    const list = document.getElementById("recent-workspaces-list");
+    if (!list) return;
+    try {
+      const resp = await fetch("/api/recent-workspaces");
+      const data = await resp.json();
+      const recent = data.recent || [];
+      list.innerHTML = "";
+      if (recent.length === 0) {
+        list.innerHTML = '<div class="menu-option disabled"><span>No recent projects</span></div>';
+        return;
+      }
+      for (const entry of recent) {
+        const item = document.createElement("div");
+        item.className = "recent-item";
+        item.style.position = "relative";
+        item.innerHTML = `
+        <span class="recent-name">${escHtml(entry.name)}</span>
+        <span class="recent-path" title="${escHtml(entry.path)}">${escHtml(entry.path)}</span>
+        <span class="recent-remove" title="Remove from list">\xD7</span>
+      `;
+        item.addEventListener("click", (e) => {
+          const target = e.target;
+          if (target.classList.contains("recent-remove")) return;
+          e.stopPropagation();
+          menuFile.classList.remove("open");
+          openWorkspaceByPath(entry.path);
+        });
+        const removeBtn = item.querySelector(".recent-remove");
+        removeBtn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          await fetch("/api/recent-workspaces", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path: entry.path })
+          });
+          loadRecentWorkspaces();
+        });
+        list.appendChild(item);
+      }
+    } catch {
+      list.innerHTML = '<div class="menu-option disabled"><span>Failed to load</span></div>';
+    }
+  }
+  function escHtml(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  async function openWorkspaceByPath(dirPath) {
+    terminal.addLine("system", `Opening: ${dirPath}`);
+    try {
+      const resp = await fetch("/workspace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace: dirPath })
+      });
+      if (!resp.ok) {
+        terminal.addLine("stderr", `Failed to open workspace (${resp.status})`);
+        return;
+      }
+      await loadFileTree();
+      terminal.addLine("system", `Opened: ${dirPath}`);
+    } catch (err) {
+      terminal.addLine("stderr", `Error: ${err.message}`);
+    }
   }
   function setupSidebar() {
     function toggleSidebar() {
@@ -612,7 +679,7 @@
     const container = document.getElementById("terminal-xterm");
     if (!container) return;
     const xtermLib = window.xtermLib;
-    if (!xtermLib) return;
+    if (!xtermLib || typeof xtermLib.Terminal !== "function") return;
     xterm = new xtermLib.Terminal({
       cursorBlink: true,
       fontSize: 13,
@@ -662,19 +729,22 @@
       }
     });
   }
-  function setupTerminalTabs() {
-    const tabBtns = document.querySelectorAll(".terminal-tab-btn");
+  function setupBottomPanel() {
+    const TabManagerClass = window.TabManager;
+    if (!TabManagerClass) {
+      console.error("TabManager not loaded");
+      return;
+    }
     const xtermPanel = document.getElementById("terminal-xterm");
     const outputPanel = document.getElementById("terminal-output");
-    tabBtns.forEach((btn) => {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const tab = btn.getAttribute("data-tab");
-        activeTerminalTab = tab;
-        tabBtns.forEach((b) => b.classList.toggle("active", b === btn));
-        if (xtermPanel) xtermPanel.style.display = tab === "terminal" ? "" : "none";
-        if (outputPanel) outputPanel.style.display = tab === "output" ? "" : "none";
-        if (tab === "terminal" && xtermFitAddon && xterm) {
+    const problemsPanel = document.getElementById("terminal-problems");
+    problemsPanel.innerHTML = '<p class="placeholder">No problems detected.</p>';
+    tabManager = new TabManagerClass("terminal-header", "terminal-body");
+    tabManager.addTab("terminal", "Terminal", xtermPanel, {
+      active: true,
+      onActivate: () => {
+        activeTerminalTab = "terminal";
+        if (xtermFitAddon && xterm) {
           setTimeout(() => {
             try {
               xtermFitAddon.fit();
@@ -686,15 +756,23 @@
             }
           }, 50);
         }
-      });
+      }
     });
-    if (xtermPanel) {
-      new MutationObserver(() => {
-        if (xtermPanel.style.display !== "none" && xtermWs?.readyState !== WebSocket.OPEN) {
-          connectTerminalWs();
-        }
-      }).observe(xtermPanel, { attributes: true, attributeFilter: ["style"] });
-    }
+    tabManager.addTab("output", "Output", outputPanel, {
+      onActivate: () => {
+        activeTerminalTab = "output";
+      }
+    });
+    tabManager.addTab("problems", "Problems", problemsPanel, {
+      onActivate: () => {
+        activeTerminalTab = "problems";
+      }
+    });
+    new MutationObserver(() => {
+      if (xtermPanel.style.display !== "none" && xtermWs?.readyState !== WebSocket.OPEN) {
+        connectTerminalWs();
+      }
+    }).observe(xtermPanel, { attributes: true, attributeFilter: ["style"] });
   }
   var lastCommandPoll = 0;
   function pollMcpCommands() {
@@ -717,8 +795,12 @@
     terminal = new window.TerminalRenderer(terminalBody);
     terminal.sourceInfoMode = sourceInfoMode;
     bridge = new window.IframeBridge(iframeViewer);
-    initXterm();
-    setupTerminalTabs();
+    try {
+      initXterm();
+    } catch (e) {
+      console.error("xterm init failed:", e);
+    }
+    setupBottomPanel();
     setupMenuBar();
     setupSidebar();
     folderInput.addEventListener("change", handleFolderOpen);

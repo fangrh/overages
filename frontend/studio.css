@@ -126,6 +126,99 @@ body {
   background: #313244;
 }
 
+.menu-option.disabled {
+  color: #585b70;
+  cursor: default;
+}
+
+.menu-option.disabled:hover {
+  background: transparent;
+}
+
+.menu-separator {
+  height: 1px;
+  background: #313244;
+  margin: 4px 0;
+}
+
+.menu-arrow {
+  font-size: 10px;
+  color: #6c7086;
+  margin-left: 16px;
+}
+
+/* Submenu */
+.menu-option.has-submenu {
+  position: relative;
+}
+
+.menu-submenu {
+  display: none;
+  position: absolute;
+  left: 100%;
+  top: 0;
+  min-width: 260px;
+  background: #1e1e2e;
+  border: 1px solid #313244;
+  border-radius: 4px;
+  padding: 4px 0;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  z-index: 1001;
+}
+
+.menu-option.has-submenu:hover > .menu-submenu {
+  display: block;
+}
+
+.recent-item {
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.recent-item:hover {
+  background: #313244;
+}
+
+.recent-item .recent-name {
+  color: #cdd6f4;
+  font-weight: 500;
+}
+
+.recent-item .recent-path {
+  color: #6c7086;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 230px;
+}
+
+.recent-item .recent-remove {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #585b70;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+  border-radius: 2px;
+  display: none;
+}
+
+.recent-item:hover .recent-remove {
+  display: block;
+}
+
+.recent-item .recent-remove:hover {
+  color: #f38ba8;
+  background: rgba(243, 139, 168, 0.15);
+}
+
 .menu-shortcut {
   color: #6c7086;
   font-size: 12px;

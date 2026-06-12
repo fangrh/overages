@@ -9,10 +9,55 @@ let workspacePath: string | null = null;
 const fileStore: Map<string, string> = new Map();
 
 const STATE_FILE = path.join(process.cwd(), '.supergds-state.json');
+const RECENT_FILE = path.join(os.homedir(), '.supergds-recent.json');
+
+const MAX_RECENT = 10;
 
 interface WorkspaceState {
   workspacePath: string | null;
   currentFile: string | null;
+}
+
+interface RecentEntry {
+  path: string;
+  name: string;
+  lastOpened: string;
+}
+
+// --- Recent workspaces management ---
+
+function loadRecent(): RecentEntry[] {
+  try {
+    const raw = fs.readFileSync(RECENT_FILE, 'utf-8');
+    return JSON.parse(raw) as RecentEntry[];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecent(entries: RecentEntry[]): void {
+  fs.writeFileSync(RECENT_FILE, JSON.stringify(entries, null, 2), 'utf-8');
+}
+
+export function addRecentWorkspace(wsPath: string): void {
+  const entries = loadRecent();
+  const name = path.basename(wsPath);
+  const filtered = entries.filter(e => e.path !== wsPath);
+  filtered.unshift({ path: wsPath, name, lastOpened: new Date().toISOString() });
+  saveRecent(filtered.slice(0, MAX_RECENT));
+}
+
+export function getRecentWorkspaces(): RecentEntry[] {
+  const entries = loadRecent();
+  // Filter out paths that no longer exist
+  return entries.filter(e => {
+    try { fs.accessSync(e.path); return true; } catch { return false; }
+  });
+}
+
+export function removeRecentWorkspace(wsPath: string): void {
+  const entries = loadRecent().filter(e => e.path !== wsPath);
+  saveRecent(entries);
 }
 
 // Synchronous initial load — blocks until state is read
@@ -22,6 +67,8 @@ try {
   if (state.workspacePath) {
     workspacePath = state.workspacePath;
     console.log('[workspace] restored workspace:', workspacePath);
+    // Add restored workspace to recent list
+    addRecentWorkspace(workspacePath);
   }
 } catch {
   // No state file yet — nothing to restore
@@ -34,6 +81,7 @@ async function saveState(state: WorkspaceState): Promise<void> {
 export async function setWorkspacePath(p: string, currentFile?: string | null): Promise<void> {
   workspacePath = p;
   await saveState({ workspacePath: p, currentFile: currentFile ?? null });
+  addRecentWorkspace(p);
 }
 
 export function getWorkspacePath(): string {

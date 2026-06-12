@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import path from 'path';
 import fs from 'fs/promises';
-import { setWorkspacePath, getWorkspacePath, isWithinWorkspace, storeFiles, getStoredFile, hasFileStore } from './workspace.js';
+import { setWorkspacePath, getWorkspacePath, isWithinWorkspace, storeFiles, getStoredFile, hasFileStore, getRecentWorkspaces, removeRecentWorkspace } from './workspace.js';
 
 interface WorkspaceBody {
   workspace: string;
@@ -38,6 +38,18 @@ export async function registerFileRoutes(app: FastifyInstance) {
     } catch {
       return { workspace: null };
     }
+  });
+
+  // Return list of recently opened workspaces
+  app.get('/api/recent-workspaces', async () => {
+    return { recent: getRecentWorkspaces() };
+  });
+
+  // Remove a workspace from the recent list
+  app.delete('/api/recent-workspaces', async (req) => {
+    const { path: wsPath } = req.body as { path: string };
+    if (wsPath) removeRecentWorkspace(wsPath);
+    return { success: true };
   });
 
   app.get('/files/*', async (req, reply) => {

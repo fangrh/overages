@@ -228,6 +228,87 @@ function setupMenuBar() {
     terminal.addLine('system', `Select a folder using the dialog...`);
     folderInput.click();
   });
+
+  // Load recent workspaces into the submenu
+  loadRecentWorkspaces();
+}
+
+async function loadRecentWorkspaces(): Promise<void> {
+  const list = document.getElementById('recent-workspaces-list');
+  if (!list) return;
+
+  try {
+    const resp = await fetch('/api/recent-workspaces');
+    const data = await resp.json();
+    const recent = data.recent || [];
+
+    list.innerHTML = '';
+
+    if (recent.length === 0) {
+      list.innerHTML = '<div class="menu-option disabled"><span>No recent projects</span></div>';
+      return;
+    }
+
+    for (const entry of recent) {
+      const item = document.createElement('div');
+      item.className = 'recent-item';
+      item.style.position = 'relative';
+      item.innerHTML = `
+        <span class="recent-name">${escHtml(entry.name)}</span>
+        <span class="recent-path" title="${escHtml(entry.path)}">${escHtml(entry.path)}</span>
+        <span class="recent-remove" title="Remove from list">×</span>
+      `;
+
+      // Click to open
+      item.addEventListener('click', (e) => {
+        const target = e.target as HTMLElement;
+        if (target.classList.contains('recent-remove')) return;
+        e.stopPropagation();
+        menuFile.classList.remove('open');
+        openWorkspaceByPath(entry.path);
+      });
+
+      // Remove button
+      const removeBtn = item.querySelector('.recent-remove')!;
+      removeBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await fetch('/api/recent-workspaces', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: entry.path }),
+        });
+        loadRecentWorkspaces();
+      });
+
+      list.appendChild(item);
+    }
+  } catch {
+    list.innerHTML = '<div class="menu-option disabled"><span>Failed to load</span></div>';
+  }
+}
+
+function escHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+async function openWorkspaceByPath(dirPath: string): Promise<void> {
+  terminal.addLine('system', `Opening: ${dirPath}`);
+  try {
+    // Use the native filesystem path approach
+    const resp = await fetch('/workspace', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspace: dirPath }),
+    });
+    if (!resp.ok) {
+      terminal.addLine('stderr', `Failed to open workspace (${resp.status})`);
+      return;
+    }
+    await loadFileTree();
+    terminal.addLine('system', `Opened: ${dirPath}`);
+  } catch (err: any) {
+    terminal.addLine('stderr', `Error: ${err.message}`);
+  }
 }
 
 // Sidebar toggle
