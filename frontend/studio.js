@@ -455,13 +455,21 @@
   async function loadPythonEnvironments() {
     if (!pythonEnvSelect) return;
     try {
-      const res = await fetch("/api/python-environments");
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 1e4);
+      const res = await fetch("/api/python-environments", { signal: controller.signal });
+      clearTimeout(timeout);
       if (!res.ok) {
         console.error("Failed to load Python environments:", res.status);
+        pythonEnvSelect.innerHTML = '<option value="">Python (default)</option>';
         return;
       }
       const { environments } = await res.json();
       pythonEnvSelect.innerHTML = "";
+      if (environments.length === 0) {
+        pythonEnvSelect.innerHTML = '<option value="">No env found \u2014 using default</option>';
+        return;
+      }
       for (const env of environments) {
         const option = document.createElement("option");
         option.value = env.path;
@@ -474,18 +482,21 @@
       }
     } catch (err) {
       console.error("Error loading Python environments:", err);
+      if (pythonEnvSelect) {
+        pythonEnvSelect.innerHTML = '<option value="">Python (default)</option>';
+      }
     }
   }
   async function loadFileTree() {
     const res = await fetch("/api/files");
     if (!res.ok) {
       console.error("Failed to load files:", res.status);
-      fileTree.innerHTML = '<div style="padding:8px;color:#f38ba8;">Error loading files</div>';
+      fileTree.innerHTML = '<div style="padding:8px;color:#f38ba8;">Could not read workspace. Try File \u2192 Open Folder.</div>';
       return;
     }
     const { files } = await res.json();
     if (!files || files.length === 0) {
-      fileTree.innerHTML = '<div style="padding:8px;color:#6c7086;">No files found</div>';
+      fileTree.innerHTML = '<div style="padding:8px;color:#6c7086;">No files found in workspace.</div>';
       return;
     }
     const displayFiles = files.filter((f) => {
@@ -793,9 +804,23 @@
       if (data.workspace) {
         workspacePath = data.workspace;
         sessionStorage.setItem("supergds-workspace", data.workspace);
-        await openWorkspace(data.workspace);
+        try {
+          await openWorkspace(data.workspace);
+        } catch {
+          console.warn("Restored workspace not found, clearing:", data.workspace);
+          workspacePath = null;
+          sessionStorage.removeItem("supergds-workspace");
+          await fetch("/workspace", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ workspace: "" })
+          }).catch(() => {
+          });
+          fileTree.innerHTML = '<div style="padding:8px;color:#6c7086;">Open a folder to get started (File \u2192 Open Folder)</div>';
+        }
       }
     } catch {
+      fileTree.innerHTML = '<div style="padding:8px;color:#6c7086;">Open a folder to get started (File \u2192 Open Folder)</div>';
     }
   }
   var sourceInfoMode = "off";
