@@ -4,9 +4,9 @@ import { parseGdsFile } from '../lib/gdsParser.js';
 
 export async function registerParseRoutes(app: FastifyInstance) {
   app.post('/api/parse', async (req) => {
-    const { gdsPath } = req.body as { gdsPath: string };
+    const { gdsPath, pythonPath } = req.body as { gdsPath: string; pythonPath?: string };
     if (!gdsPath) throw new Error('gdsPath required');
-    const geojson = await parseGdsFile(gdsPath);
+    const geojson = await parseGdsFile(gdsPath, pythonPath);
     return { geojson, mode: 'full' };
   });
 }

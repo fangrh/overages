@@ -57,7 +57,7 @@ export async function runPythonScript(
       if (!gdsPath) return reject(new Error('No .gds file found after build'));
 
       const { parseGdsFile } = await import('./gdsParser.js');
-      const geojson = await parseGdsFile(gdsPath);
+      const geojson = await parseGdsFile(gdsPath, opts.pythonPath);
 
       // Check if provenance sidecar exists
       const sidecarPath = gdsPath.replace(/\.gds$/i, '.provenance.json');

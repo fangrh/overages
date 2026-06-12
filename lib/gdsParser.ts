@@ -3,13 +3,13 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// superGDS root is two levels up from lib/ (overgds/lib → overgds → superGDS)
-const SUPERGDS_ROOT = path.resolve(__dirname, '../..');
+const SUPERGDS_ROOT = path.resolve(__dirname, '..');
 
-export async function parseGdsFile(gdsPath: string): Promise<unknown> {
+export async function parseGdsFile(gdsPath: string, pythonPath?: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const parseScript = path.join(SUPERGDS_ROOT, 'python/parse_gds.py');
-    const proc = spawn('python', [parseScript, gdsPath], {
+    const python = pythonPath || 'python';
+    const proc = spawn(python, [parseScript, gdsPath], {
       cwd: SUPERGDS_ROOT,
     });
 
