@@ -3,10 +3,18 @@ html, body { height: 100%; overflow: hidden; }
 
 body {
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: #1a1a2e;
   color: #cdd6f4;
+}
+
+/* Content row — sits below the full-width menu bar */
+#content-row {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  min-height: 0;
 }
 
 /* Left Panel: Activity Bar + Sidebar */

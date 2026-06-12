@@ -8,6 +8,29 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm/css/xterm.css">
 </head>
 <body>
+<!-- Menu Bar — full-width top bar (VS Code style) -->
+<div id="menu-bar">
+  <div class="menu-item" id="menu-file">
+    <span class="menu-title">File</span>
+    <div class="menu-dropdown" id="file-dropdown">
+      <div class="menu-option" id="menu-open-folder">
+        <span>Open Folder</span>
+        <span class="menu-shortcut">⌘O</span>
+      </div>
+      <div class="menu-separator"></div>
+      <div class="menu-option has-submenu" id="menu-open-recent">
+        <span>Open Recent</span>
+        <span class="menu-arrow">▶</span>
+        <div class="menu-submenu" id="recent-workspaces-list">
+          <div class="menu-option disabled"><span>No recent projects</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Content row: Activity Bar + Sidebar + Main Column -->
+<div id="content-row">
 <!-- Left: Activity Bar + Sidebar -->
 <div id="left-panel">
   <!-- Activity Bar (left icons) -->
@@ -28,29 +51,8 @@
   </div>
 </div>
 
-<!-- Right: Main column with Menu Bar + Content -->
+<!-- Right: Main column with Content only -->
 <div id="main-column">
-  <!-- Menu Bar -->
-  <div id="menu-bar">
-    <div class="menu-item" id="menu-file">
-      <span class="menu-title">File</span>
-      <div class="menu-dropdown" id="file-dropdown">
-        <div class="menu-option" id="menu-open-folder">
-          <span>Open Folder</span>
-          <span class="menu-shortcut">⌘O</span>
-        </div>
-        <div class="menu-separator"></div>
-        <div class="menu-option has-submenu" id="menu-open-recent">
-          <span>Open Recent</span>
-          <span class="menu-arrow">▶</span>
-          <div class="menu-submenu" id="recent-workspaces-list">
-            <div class="menu-option disabled"><span>No recent projects</span></div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <!-- Main Content (Editor + Viewer + Terminal) -->
   <div id="main-content">
     <!-- Toolbar -->
@@ -137,6 +139,7 @@
     </div>
   </div>
 </div>
+</div><!-- /#content-row -->
 
 <!-- Hidden folder input -->
 <input type="file" id="folder-input" webkitdirectory style="display:none">
