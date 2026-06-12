@@ -11,6 +11,44 @@
   var xtermWs = null;
   var activeTerminalTab = "terminal";
   var tabManager = null;
+  function updateSourcePanel(panel, components) {
+    if (!components || components.length === 0) {
+      panel.innerHTML = '<p class="placeholder">Click a polygon in the GDS viewer to inspect source</p>';
+      return;
+    }
+    let html = "";
+    for (let i = 0; i < components.length; i++) {
+      const comp = components[i];
+      const prov = comp.provenance || {};
+      if (i > 0) html += '<div style="height:1px;background:#313244;margin:6px 0;"></div>';
+      html += '<div style="margin-bottom:4px;">';
+      if (prov.instance_name) {
+        html += `<div class="kv"><span class="key" style="color:#6c7086;min-width:90px;text-align:right;display:inline-block;margin-right:8px;">Name:</span><span style="color:#f9e2af;">${prov.instance_name}</span></div>`;
+      }
+      if (prov.file) {
+        const shortFile = prov.file.replace(/\\/g, "/").split("/").pop() || prov.file;
+        html += `<div class="kv"><span class="key" style="color:#6c7086;min-width:90px;text-align:right;display:inline-block;margin-right:8px;">File:</span><span class="source-jump" data-file="${prov.file}" data-line="${prov.line || 1}" style="color:#89b4fa;cursor:pointer;text-decoration:underline;">${shortFile}:${prov.line || "?"}</span></div>`;
+      }
+      if (prov.call_chain && prov.call_chain.length > 0) {
+        html += `<div class="kv"><span class="key" style="color:#6c7086;min-width:90px;text-align:right;display:inline-block;margin-right:8px;">Call chain:</span><span style="color:#cba6f7;">${prov.call_chain.join(" \u2192 ")}</span></div>`;
+      }
+      if (prov.layer_name) {
+        html += `<div class="kv"><span class="key" style="color:#6c7086;min-width:90px;text-align:right;display:inline-block;margin-right:8px;">Layer:</span><span>${prov.layer_name}</span></div>`;
+      }
+      html += "</div>";
+    }
+    panel.innerHTML = html;
+    panel.querySelectorAll(".source-jump").forEach((el) => {
+      el.addEventListener("click", () => {
+        const file = el.getAttribute("data-file");
+        const line = parseInt(el.getAttribute("data-line") || "1", 10);
+        const studio = window.studio;
+        studio?.openFile(file)?.then(() => {
+          studio?.jumpToLine?.(line);
+        });
+      });
+    });
+  }
   var ResizeHandle = class {
     handle;
     editorPane;
@@ -768,6 +806,71 @@
         activeTerminalTab = "problems";
       }
     });
+    tabManager.addAvailableTab("source", "Source", () => {
+      const panel = document.createElement("div");
+      panel.className = "terminal-tab-panel";
+      panel.style.cssText = "padding:8px 12px;font:13px/1.5 'Cascadia Code','Fira Code',monospace;color:#cdd6f4;";
+      panel.innerHTML = '<p class="placeholder">Click a polygon in the GDS viewer to inspect source</p>';
+      const handler = (e) => {
+        const customEvent = e;
+        updateSourcePanel(panel, customEvent.detail);
+      };
+      window.addEventListener("gds-selection", handler);
+      panel.__cleanup = () => window.removeEventListener("gds-selection", handler);
+      return { el: panel };
+    }, "\u{1F4CB}");
+    tabManager.addAvailableTab("claude", "Claude", () => {
+      const panel = document.createElement("div");
+      panel.className = "terminal-tab-panel";
+      panel.style.cssText = "display:flex;flex-direction:column;height:100%;font:13px/1.5 'Cascadia Code','Fira Code',monospace;color:#cdd6f4;";
+      const messages = document.createElement("div");
+      messages.style.cssText = "flex:1;overflow-y:auto;padding:4px 0;";
+      messages.innerHTML = '<p class="placeholder" style="color:#585b70;font-style:italic;padding:20px 0;text-align:center;">Ask about the GDS layout...</p>';
+      panel.appendChild(messages);
+      const inputRow = document.createElement("div");
+      inputRow.style.cssText = "display:flex;gap:4px;padding-top:4px;border-top:1px solid #313244;";
+      const input = document.createElement("input");
+      input.type = "text";
+      input.placeholder = "Ask about the layout...";
+      input.style.cssText = "flex:1;background:#11111b;border:1px solid #313244;color:#cdd6f4;padding:4px 8px;border-radius:3px;font:12px/1.4 'Cascadia Code','Fira Code',monospace;outline:none;";
+      const sendBtn = document.createElement("button");
+      sendBtn.textContent = "Send";
+      sendBtn.style.cssText = "background:#89b4fa;color:#1e1e2e;border:none;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:11px;font-weight:600;";
+      const sendQuestion = () => {
+        const q = input.value.trim();
+        if (!q) return;
+        const userMsg = document.createElement("div");
+        userMsg.style.cssText = "padding:4px 8px;margin:2px 0;color:#cdd6f4;";
+        userMsg.textContent = "> " + q;
+        messages.appendChild(userMsg);
+        input.value = "";
+        fetch("/api/ask-claude", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: q })
+        }).then((r) => r.json()).then((data) => {
+          const resp = document.createElement("div");
+          resp.style.cssText = "padding:4px 8px;margin:2px 0;color:#89b4fa;white-space:pre-wrap;";
+          resp.textContent = data.answer || data.error || "No response";
+          messages.appendChild(resp);
+          messages.scrollTop = messages.scrollHeight;
+        }).catch(() => {
+          const err = document.createElement("div");
+          err.style.cssText = "padding:4px 8px;margin:2px 0;color:#f38ba8;";
+          err.textContent = "Failed to get response";
+          messages.appendChild(err);
+        });
+        messages.scrollTop = messages.scrollHeight;
+      };
+      sendBtn.addEventListener("click", sendQuestion);
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") sendQuestion();
+      });
+      inputRow.appendChild(input);
+      inputRow.appendChild(sendBtn);
+      panel.appendChild(inputRow);
+      return { el: panel };
+    }, "\u{1F916}");
     new MutationObserver(() => {
       if (xtermPanel.style.display !== "none" && xtermWs?.readyState !== WebSocket.OPEN) {
         connectTerminalWs();

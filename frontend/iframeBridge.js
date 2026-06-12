@@ -41,6 +41,7 @@
           }).catch(() => {
           });
           this.forwardToEditor(components);
+          window.dispatchEvent(new CustomEvent("gds-selection", { detail: components }));
           break;
         }
         case "askClaude":

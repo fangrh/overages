@@ -39,6 +39,14 @@ body { display: flex; background: #1a1a2e; font-family: -apple-system, BlinkMacS
 .panel-tab-close:hover { color: #f38ba8; background: rgba(243,139,168,0.15); }
 /* Legacy */
 .tab-btn { }
+/* "+" Add-tab button */
+.panel-tab-add-btn { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; margin-left: 4px; font-size: 14px; font-weight: 400; color: #6c7086; cursor: pointer; border-radius: 4px; user-select: none; transition: background 0.15s, color 0.15s; line-height: 1; }
+.panel-tab-add-btn:hover { background: #313244; color: #cdd6f4; }
+.panel-tab-add-dropdown { display: none; position: fixed; background: #1e1e2e; border: 1px solid #313244; border-radius: 6px; padding: 4px 0; min-width: 140px; z-index: 9999; box-shadow: 0 4px 16px rgba(0,0,0,0.5); animation: tab-dropdown-in 0.12s ease-out; }
+@keyframes tab-dropdown-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+.panel-tab-add-option { padding: 6px 12px; font-size: 12px; color: #cdd6f4; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: background 0.1s; }
+.panel-tab-add-option:hover { background: #313244; color: #89b4fa; }
+.panel-tab-add-empty { padding: 8px 12px; font-size: 11px; color: #585b70; font-style: italic; text-align: center; }
 #claude-mode { background: #1e1e2e; color: #cdd6f4; border: 1px solid #313244; border-radius: 4px; padding: 2px 6px; font-size: 11px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; cursor: pointer; outline: none; }
 #claude-mode:hover { border-color: #585b70; }
 #claude-mode option { background: #1e1e2e; color: #cdd6f4; }
@@ -1603,6 +1611,45 @@ function setupViewerTabs() {
             if (input) setTimeout(function() { input.focus(); }, 100);
         }
     });
+
+    // === Available tabs (shown in "+" dropdown) ===
+
+    // Log tab — action/event log
+    viewerTabManager.addAvailableTab('log', 'Log', function() {
+        var panel = document.createElement('div');
+        panel.className = 'terminal-tab-panel';
+        panel.style.cssText = 'padding:8px 12px;font:12px/1.5 \'Cascadia Code\',\'Fira Code\',monospace;color:#cdd6f4;overflow-y:auto;';
+        panel.innerHTML = '<p class="placeholder" style="color:#585b70;font-style:italic;padding:20px 0;text-align:center;">Actions will appear here</p>';
+        // Store reference for event logging
+        window.__viewerLogPanel = panel;
+        return { el: panel };
+    }, '📝');
+
+    // Help tab — keyboard shortcuts and controls reference
+    viewerTabManager.addAvailableTab('help', 'Help', function() {
+        var panel = document.createElement('div');
+        panel.className = 'terminal-tab-panel';
+        panel.style.cssText = 'padding:12px 16px;font:12px/1.6 \'Cascadia Code\',\'Fira Code\',monospace;color:#cdd6f4;overflow-y:auto;';
+        panel.innerHTML = [
+            '<div style="color:#89b4fa;font-weight:600;font-size:13px;margin-bottom:8px;">Keyboard Shortcuts</div>',
+            '<div style="display:grid;grid-template-columns:100px 1fr;gap:4px 12px;">',
+            '<span style="color:#f9e2af;">Ctrl+A</span><span>Cycle selection (narrow → broad)</span>',
+            '<span style="color:#f9e2af;">Ctrl+Click</span><span>Add to selection</span>',
+            '<span style="color:#f9e2af;">Escape</span><span>Clear selection / exit tool</span>',
+            '<span style="color:#f9e2af;">Delete</span><span>Delete drawn shapes</span>',
+            '<span style="color:#f9e2af;">Scroll</span><span>Zoom in/out</span>',
+            '<span style="color:#f9e2af;">Drag</span><span>Pan the map</span>',
+            '</div>',
+            '<div style="color:#89b4fa;font-weight:600;font-size:13px;margin:12px 0 8px;">Tools</div>',
+            '<div style="display:grid;grid-template-columns:100px 1fr;gap:4px 12px;">',
+            '<span style="color:#f9e2af;">Select</span><span>Click to select polygons</span>',
+            '<span style="color:#f9e2af;">Draw</span><span>Draw polygon annotations</span>',
+            '<span style="color:#f9e2af;">Measure</span><span>Measure distances</span>',
+            '<span style="color:#f9e2af;">Snap</span><span>Snap to grid/edges</span>',
+            '</div>',
+        ].join('\n');
+        return { el: panel };
+    }, '❓');
 
     // Setup Claude chat send
     var claudeInput = document.getElementById('claude-input');

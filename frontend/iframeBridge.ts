@@ -62,6 +62,8 @@ export class IframeBridge {
           body: JSON.stringify({ type: 'selection', components }),
         }).catch(() => {});
         this.forwardToEditor(components);
+        // Dispatch global event so bottom panel Source tab can update
+        window.dispatchEvent(new CustomEvent('gds-selection', { detail: components }));
         break;
       }
       case 'askClaude':
