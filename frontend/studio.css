@@ -378,6 +378,21 @@ body {
   flex: 1;
 }
 
+.sidebar-action {
+  background: transparent;
+  border: none;
+  color: #6c7086;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.sidebar-action:hover {
+  color: #cdd6f4;
+  background: #313244;
+}
+
 #file-tree {
   flex: 1;
   overflow-y: auto;

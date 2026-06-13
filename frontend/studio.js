@@ -9684,6 +9684,12 @@ ${h2.join(`
     if (activityExplorer) {
       activityExplorer.addEventListener("click", toggleSidebar);
     }
+    document.getElementById("refresh-file-tree")?.addEventListener("click", () => {
+      loadFileTree();
+    });
+    window.addEventListener("focus", () => {
+      if (workspacePath) loadFileTree();
+    });
   }
   function buildFileTree(files) {
     const root = /* @__PURE__ */ new Map();
@@ -9893,6 +9899,12 @@ ${h2.join(`
     });
   }
   async function loadFileTree() {
+    const expandedPaths = /* @__PURE__ */ new Set();
+    fileTree.querySelectorAll(".tree-item.folder.expanded").forEach((el2) => {
+      const nameEl = el2.querySelector(".item-name");
+      if (nameEl) expandedPaths.add(nameEl.title);
+    });
+    const isRefresh = expandedPaths.size > 0;
     const res = await fetch("/api/files");
     if (!res.ok) {
       console.error("Failed to load files:", res.status);
@@ -9910,13 +9922,29 @@ ${h2.join(`
     });
     const tree = buildFileTree(displayFiles);
     renderFileTree(tree, fileTree);
-    fileTree.querySelectorAll(".tree-item.folder").forEach((item) => {
-      item.classList.add("expanded");
-      const toggle = item.querySelector(".folder-toggle");
-      if (toggle) toggle.textContent = "\u25BC";
-      const childContainer = item.nextElementSibling;
-      if (childContainer) childContainer.style.display = "block";
-    });
+    if (isRefresh) {
+      const paths = Array.from(expandedPaths).sort(
+        (a, b2) => a.split("/").length - b2.split("/").length
+      );
+      for (const p of paths) expandFolderPath(p);
+    } else {
+      fileTree.querySelectorAll(".tree-item.folder").forEach((item) => {
+        item.classList.add("expanded");
+        const toggle = item.querySelector(".folder-toggle");
+        if (toggle) toggle.textContent = "\u25BC";
+        const childContainer = item.nextElementSibling;
+        if (childContainer) childContainer.style.display = "block";
+      });
+    }
+  }
+  function expandFolderPath(path) {
+    for (const item of Array.from(fileTree.querySelectorAll(".tree-item.folder"))) {
+      const nameEl = item.querySelector(".item-name");
+      if (nameEl && nameEl.title === path) {
+        if (!item.classList.contains("expanded")) item.click();
+        return;
+      }
+    }
   }
   async function saveCurrentFile() {
     if (!currentFile) return;
@@ -9979,6 +10007,7 @@ ${h2.join(`
         })
       }).catch(() => {
       });
+      loadFileTree();
     });
     es2.addEventListener("error", (e) => {
       if (completed) return;

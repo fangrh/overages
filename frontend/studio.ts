@@ -681,6 +681,18 @@ function setupSidebar() {
   if (activityExplorer) {
     activityExplorer.addEventListener('click', toggleSidebar);
   }
+
+  // Manual explorer refresh — catches files created via terminal / external tools
+  document.getElementById('refresh-file-tree')?.addEventListener('click', () => {
+    loadFileTree();
+  });
+
+  // Auto-refresh when the window regains focus, so files created outside the
+  // app appear without a manual action. Guarded on an open workspace so an
+  // unfocused idle state doesn't flash an error.
+  window.addEventListener('focus', () => {
+    if (workspacePath) loadFileTree();
+  });
 }
 
 // Build file tree from flat list
@@ -946,6 +958,15 @@ async function initPythonEnv() {
 }
 
 async function loadFileTree() {
+  // Capture currently-expanded folders so a refresh preserves the user's view
+  // (otherwise re-rendering collapses every open folder).
+  const expandedPaths = new Set<string>();
+  fileTree.querySelectorAll('.tree-item.folder.expanded').forEach((el) => {
+    const nameEl = el.querySelector('.item-name') as HTMLElement | null;
+    if (nameEl) expandedPaths.add(nameEl.title);
+  });
+  const isRefresh = expandedPaths.size > 0;
+
   const res = await fetch('/api/files');
   if (!res.ok) {
     console.error('Failed to load files:', res.status);
@@ -968,14 +989,33 @@ async function loadFileTree() {
   const tree = buildFileTree(displayFiles);
   renderFileTree(tree, fileTree);
 
-  // Expand first level by default
-  fileTree.querySelectorAll('.tree-item.folder').forEach(item => {
-    item.classList.add('expanded');
-    const toggle = item.querySelector('.folder-toggle');
-    if (toggle) toggle.textContent = '▼';
-    const childContainer = item.nextElementSibling as HTMLElement;
-    if (childContainer) childContainer.style.display = 'block';
-  });
+  if (isRefresh) {
+    // Restore exactly the folders the user had open (parents before children).
+    const paths = Array.from(expandedPaths).sort(
+      (a, b) => a.split('/').length - b.split('/').length,
+    );
+    for (const p of paths) expandFolderPath(p);
+  } else {
+    // First load: expand the top level by default.
+    fileTree.querySelectorAll('.tree-item.folder').forEach(item => {
+      item.classList.add('expanded');
+      const toggle = item.querySelector('.folder-toggle');
+      if (toggle) toggle.textContent = '▼';
+      const childContainer = item.nextElementSibling as HTMLElement;
+      if (childContainer) childContainer.style.display = 'block';
+    });
+  }
+}
+
+// Re-expand a folder in the tree by its path (used when preserving state on refresh).
+function expandFolderPath(path: string): void {
+  for (const item of Array.from(fileTree.querySelectorAll('.tree-item.folder'))) {
+    const nameEl = item.querySelector('.item-name') as HTMLElement | null;
+    if (nameEl && nameEl.title === path) {
+      if (!item.classList.contains('expanded')) (item as HTMLElement).click();
+      return;
+    }
+  }
 }
 
 async function saveCurrentFile() {
@@ -1042,6 +1082,9 @@ async function handleRun() {
         },
       }),
     }).catch(() => {});
+
+    // The run may have created or modified project files; refresh the tree.
+    loadFileTree();
   });
   es.addEventListener('error', (e: Event) => {
     if (completed) return;
