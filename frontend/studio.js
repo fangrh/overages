@@ -9144,6 +9144,23 @@ ${h2.join(`
   var terminal;
   var currentFile = null;
   var workspacePath = null;
+  var STUDIO_COOKIE_PREFIX = "studio-";
+  var STUDIO_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
+  function setStudioCookie(name, value) {
+    const enc = encodeURIComponent(value);
+    document.cookie = `${STUDIO_COOKIE_PREFIX}${name}=${enc}; max-age=${STUDIO_COOKIE_MAX_AGE}; path=/; SameSite=Lax`;
+  }
+  function getStudioCookie(name) {
+    const key = `${STUDIO_COOKIE_PREFIX}${name}=`;
+    for (const part of document.cookie.split(";")) {
+      const t = part.trim();
+      if (t.startsWith(key)) return decodeURIComponent(t.slice(key.length));
+    }
+    return null;
+  }
+  function clearStudioCookie(name) {
+    document.cookie = `${STUDIO_COOKIE_PREFIX}${name}=; max-age=0; path=/; SameSite=Lax`;
+  }
   var xterm = null;
   var xtermFitAddon = null;
   var xtermWs = null;
@@ -9761,6 +9778,7 @@ ${h2.join(`
   async function openFile(filePath) {
     currentFile = filePath;
     sessionStorage.setItem("supergds-current-file", filePath);
+    setStudioCookie("file", filePath);
     if (workspacePath) {
       sessionStorage.setItem("supergds-workspace", workspacePath);
     }
@@ -9818,6 +9836,7 @@ ${h2.join(`
       return;
     }
     terminal.addLine("system", `Opened folder: ${folderPath}`);
+    setStudioCookie("project", folderPath);
     await loadFileTree();
   }
   async function loadPythonEnvironments() {
@@ -9854,6 +9873,24 @@ ${h2.join(`
         pythonEnvSelect.innerHTML = '<option value="">Python (default)</option>';
       }
     }
+  }
+  async function initPythonEnv() {
+    await loadPythonEnvironments();
+    if (!pythonEnvSelect) return;
+    const saved = getStudioCookie("python-env");
+    if (saved) {
+      for (const opt of Array.from(pythonEnvSelect.options)) {
+        if (opt.value === saved) {
+          pythonEnvSelect.value = saved;
+          break;
+        }
+      }
+    }
+    pythonEnvSelect.addEventListener("change", () => {
+      if (pythonEnvSelect.value) {
+        setStudioCookie("python-env", pythonEnvSelect.value);
+      }
+    });
   }
   async function loadFileTree() {
     const res = await fetch("/api/files");
@@ -10121,7 +10158,7 @@ ${h2.join(`
     rebuildBtn.addEventListener("click", handleRebuild);
     window.studio = { editor, bridge, terminal, currentFile: null, openFile, jumpToLine };
     restoreWorkspace();
-    loadPythonEnvironments();
+    initPythonEnv();
     initSettings();
     setInterval(pollMcpCommands, 1e3);
     const savedLayout = sessionStorage.getItem("supergds-layout");
@@ -10194,29 +10231,39 @@ ${h2.join(`
     });
   }
   async function restoreWorkspace() {
-    try {
-      const res = await fetch("/api/workspace");
-      const data = await res.json();
-      if (data.workspace) {
-        workspacePath = data.workspace;
-        sessionStorage.setItem("supergds-workspace", data.workspace);
-        try {
-          await openWorkspace(data.workspace);
-        } catch {
-          console.warn("Restored workspace not found, clearing:", data.workspace);
-          workspacePath = null;
-          sessionStorage.removeItem("supergds-workspace");
-          await fetch("/workspace", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ workspace: "" })
-          }).catch(() => {
-          });
-          fileTree.innerHTML = '<div style="padding:8px;color:#6c7086;">Open a project to get started (File \u2192 Open Project)</div>';
-        }
+    let project = getStudioCookie("project");
+    if (!project) {
+      try {
+        const res = await fetch("/api/workspace");
+        const data = await res.json();
+        project = data.workspace || null;
+        if (project) setStudioCookie("project", project);
+      } catch {
+        project = null;
       }
+    }
+    const emptyMsg = '<div style="padding:8px;color:#6c7086;">Open a project to get started (File \u2192 Open Project)</div>';
+    if (!project) {
+      fileTree.innerHTML = emptyMsg;
+      return;
+    }
+    try {
+      await openWorkspace(project);
     } catch {
-      fileTree.innerHTML = '<div style="padding:8px;color:#6c7086;">Open a project to get started (File \u2192 Open Project)</div>';
+      console.warn("Restored project not found, clearing:", project);
+      workspacePath = null;
+      clearStudioCookie("project");
+      clearStudioCookie("file");
+      fileTree.innerHTML = emptyMsg;
+      return;
+    }
+    const file = getStudioCookie("file");
+    if (file) {
+      try {
+        await openFile(file);
+      } catch {
+        clearStudioCookie("file");
+      }
     }
   }
   var sourceInfoMode = "off";

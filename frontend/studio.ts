@@ -32,6 +32,30 @@ let terminal: any;
 let currentFile: string | null = null;
 let workspacePath: string | null = null;
 
+// --- Cookie persistence for studio settings ---
+// Persist ONLY the selected project, the selected Python environment, and the
+// open script, so a page refresh returns to that exact state. Cookies (not
+// sessionStorage) are used so the state survives a full browser restart. The
+// JS bundle is never cached via cookies — it revalidates on every refresh, so
+// dev-mode code changes always appear.
+const STUDIO_COOKIE_PREFIX = 'studio-';
+const STUDIO_COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 year
+function setStudioCookie(name: string, value: string): void {
+  const enc = encodeURIComponent(value);
+  document.cookie = `${STUDIO_COOKIE_PREFIX}${name}=${enc}; max-age=${STUDIO_COOKIE_MAX_AGE}; path=/; SameSite=Lax`;
+}
+function getStudioCookie(name: string): string | null {
+  const key = `${STUDIO_COOKIE_PREFIX}${name}=`;
+  for (const part of document.cookie.split(';')) {
+    const t = part.trim();
+    if (t.startsWith(key)) return decodeURIComponent(t.slice(key.length));
+  }
+  return null;
+}
+function clearStudioCookie(name: string): void {
+  document.cookie = `${STUDIO_COOKIE_PREFIX}${name}=; max-age=0; path=/; SameSite=Lax`;
+}
+
 // xterm.js terminal
 let xterm: any = null;
 let xtermFitAddon: any = null;
@@ -773,6 +797,7 @@ function renderFileTree(nodes: FileNode[], container: HTMLElement, depth = 0) {
 async function openFile(filePath: string) {
   currentFile = filePath;
   sessionStorage.setItem('supergds-current-file', filePath);
+  setStudioCookie('file', filePath);
   if (workspacePath) {
     sessionStorage.setItem('supergds-workspace', workspacePath);
   }
@@ -850,6 +875,7 @@ async function openWorkspace(folderPath: string) {
   }
 
   terminal.addLine('system', `Opened folder: ${folderPath}`);
+  setStudioCookie('project', folderPath);
   await loadFileTree();
 }
 
@@ -894,6 +920,29 @@ async function loadPythonEnvironments() {
       pythonEnvSelect.innerHTML = '<option value="">Python (default)</option>';
     }
   }
+}
+
+// Load Python environments, restore the previously selected env from its
+// cookie, and persist any future selection change.
+async function initPythonEnv() {
+  await loadPythonEnvironments();
+  if (!pythonEnvSelect) return;
+
+  const saved = getStudioCookie('python-env');
+  if (saved) {
+    for (const opt of Array.from(pythonEnvSelect.options)) {
+      if (opt.value === saved) {
+        pythonEnvSelect.value = saved;
+        break;
+      }
+    }
+  }
+
+  pythonEnvSelect.addEventListener('change', () => {
+    if (pythonEnvSelect.value) {
+      setStudioCookie('python-env', pythonEnvSelect.value);
+    }
+  });
 }
 
 async function loadFileTree() {
@@ -1218,11 +1267,11 @@ export function init() {
   // Expose studio for debugging
   (window as any).studio = { editor, bridge, terminal, currentFile: null, openFile, jumpToLine };
 
-  // Restore workspace from server-persisted state
+  // Restore project + open file from cookies (falls back to server state)
   restoreWorkspace();
 
-  // Load Python environments
-  loadPythonEnvironments();
+  // Load Python environments and restore the saved selection
+  initPythonEnv();
 
   // Initialize terminal settings
   initSettings();
@@ -1317,30 +1366,47 @@ export function init() {
 }
 
 async function restoreWorkspace() {
-  try {
-    const res = await fetch('/api/workspace');
-    const data = await res.json();
-    if (data.workspace) {
-      workspacePath = data.workspace;
-      sessionStorage.setItem('supergds-workspace', data.workspace);
-      try {
-        await openWorkspace(data.workspace);
-      } catch {
-        // Workspace path no longer exists (e.g. deleted temp dir) — clear it
-        console.warn('Restored workspace not found, clearing:', data.workspace);
-        workspacePath = null;
-        sessionStorage.removeItem('supergds-workspace');
-        await fetch('/workspace', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ workspace: '' }),
-        }).catch(() => {});
-        fileTree.innerHTML = '<div style="padding:8px;color:#6c7086;">Open a project to get started (File → Open Project)</div>';
-      }
+  // Source of truth: the cookie. Fall back to server-persisted state (so a
+  // project opened before this feature still restores), then migrate it to a
+  // cookie for next time.
+  let project = getStudioCookie('project');
+  if (!project) {
+    try {
+      const res = await fetch('/api/workspace');
+      const data = await res.json();
+      project = data.workspace || null;
+      if (project) setStudioCookie('project', project);
+    } catch {
+      project = null;
     }
+  }
+
+  const emptyMsg = '<div style="padding:8px;color:#6c7086;">Open a project to get started (File → Open Project)</div>';
+  if (!project) {
+    fileTree.innerHTML = emptyMsg;
+    return;
+  }
+
+  try {
+    await openWorkspace(project);
   } catch {
-    // No persisted workspace — user will open one manually
-    fileTree.innerHTML = '<div style="padding:8px;color:#6c7086;">Open a project to get started (File → Open Project)</div>';
+    // Project path no longer accessible — clear it and let the user reopen.
+    console.warn('Restored project not found, clearing:', project);
+    workspacePath = null;
+    clearStudioCookie('project');
+    clearStudioCookie('file');
+    fileTree.innerHTML = emptyMsg;
+    return;
+  }
+
+  // Reopen the last open script (cookie), if it still exists.
+  const file = getStudioCookie('file');
+  if (file) {
+    try {
+      await openFile(file);
+    } catch {
+      clearStudioCookie('file');
+    }
   }
 }
 
