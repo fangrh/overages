@@ -10170,6 +10170,22 @@ ${h2.join(`
     }).catch(() => {
     });
   }
+  function toggleTerminal() {
+    const term = document.getElementById("terminal");
+    const icon = document.getElementById("terminal-collapse");
+    const collapsed = term.classList.toggle("collapsed");
+    if (icon) icon.textContent = collapsed ? "\u25B6" : "\u25BC";
+    const handle = document.getElementById("terminal-resize-handle");
+    if (handle) handle.style.display = collapsed ? "none" : "";
+    if (!collapsed && xtermFitAddon && xterm) {
+      setTimeout(() => {
+        try {
+          xtermFitAddon.fit();
+        } catch {
+        }
+      }, 50);
+    }
+  }
   function init() {
     editor = window.setupMonaco(monacoContainer);
     terminal = new window.TerminalRenderer(terminalBody);
@@ -10216,6 +10232,10 @@ ${h2.join(`
           setLayoutMode("split");
         }
       });
+    }
+    const terminalCollapse = document.getElementById("terminal-collapse");
+    if (terminalCollapse) {
+      terminalCollapse.addEventListener("click", () => toggleTerminal());
     }
     if (viewerTabClose) {
       viewerTabClose.addEventListener("click", (e) => {

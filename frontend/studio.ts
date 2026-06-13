@@ -1286,6 +1286,21 @@ function pollMcpCommands() {
     .catch(() => {});
 }
 
+// Collapse/expand the bottom console — mirrors the GDS viewer's toggleConsole().
+function toggleTerminal(): void {
+  const term = document.getElementById('terminal')!;
+  const icon = document.getElementById('terminal-collapse');
+  const collapsed = term.classList.toggle('collapsed');
+  if (icon) icon.textContent = collapsed ? '▶' : '▼';
+  // Hide the drag-resize handle while collapsed (nothing to resize)
+  const handle = document.getElementById('terminal-resize-handle');
+  if (handle) handle.style.display = collapsed ? 'none' : '';
+  // Refit xterm to the restored height when expanding
+  if (!collapsed && xtermFitAddon && xterm) {
+    setTimeout(() => { try { xtermFitAddon.fit(); } catch {} }, 50);
+  }
+}
+
 export function init() {
   // @ts-ignore - these are set by other chunks loaded via script tags
   editor = (window as any).setupMonaco(monacoContainer);
@@ -1353,6 +1368,12 @@ export function init() {
         setLayoutMode('split');
       }
     });
+  }
+
+  // Bottom-console collapse — mirrors the GDS viewer's toggleConsole()
+  const terminalCollapse = document.getElementById('terminal-collapse');
+  if (terminalCollapse) {
+    terminalCollapse.addEventListener('click', () => toggleTerminal());
   }
 
   // Viewer tab × button — closes viewer (switch to editor-only)
