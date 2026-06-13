@@ -4,7 +4,6 @@
   var TerminalRenderer = class {
     container;
     autoScroll = true;
-    sourceInfoMode = "off";
     constructor(container) {
       this.container = container;
       container.parentElement?.addEventListener("scroll", () => {
@@ -12,7 +11,7 @@
         this.autoScroll = scrollHeight - scrollTop - clientHeight < 50;
       });
     }
-    addLine(type, text, sourceInfo) {
+    addLine(type, text) {
       const el = document.createElement("div");
       el.className = type;
       const time = (/* @__PURE__ */ new Date()).toLocaleTimeString("en-US", { hour12: false });
@@ -21,19 +20,6 @@
       ts.textContent = `[${time}] `;
       ts.style.color = "#6c7086";
       el.appendChild(ts);
-      if (sourceInfo && this.sourceInfoMode !== "off") {
-        const src = document.createElement("span");
-        src.className = "source-info";
-        src.textContent = ` ${sourceInfo.file}:${sourceInfo.line}`;
-        src.style.color = "#89b4fa";
-        src.style.fontSize = "11px";
-        src.style.marginRight = "8px";
-        el.appendChild(src);
-        if (this.sourceInfoMode === "clipboard") {
-          navigator.clipboard.writeText(`${sourceInfo.file}:${sourceInfo.line}`).catch(() => {
-          });
-        }
-      }
       const textNode = document.createElement("span");
       textNode.textContent = text;
       el.appendChild(textNode);

@@ -1044,61 +1044,6 @@ body {
 .source-highlight { background: rgba(137, 180, 250, 0.15) !important; }
 .source-glyph { background: #89b4fa; width: 4px !important; margin-left: 3px; }
 
-/* Settings button in terminal header */
-.terminal-settings-btn {
-  font-size: 12px;
-  cursor: pointer;
-  color: #6c7086;
-  padding: 2px 6px;
-  border-radius: 3px;
-  user-select: none;
-}
-
-.terminal-settings-btn:hover {
-  color: #cdd6f4;
-  background: #313244;
-}
-
-/* Settings dropdown */
-#terminal-settings-dropdown {
-  position: absolute;
-  bottom: 28px;
-  right: 8px;
-  background: #1e1e2e;
-  border: 1px solid #313244;
-  border-radius: 4px;
-  padding: 4px 0;
-  min-width: 140px;
-  z-index: 100;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-}
-
-#terminal-settings-dropdown.hidden {
-  display: none;
-}
-
-.terminal-settings-option {
-  padding: 6px 12px;
-  font-size: 12px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #cdd6f4;
-}
-
-.terminal-settings-option:hover {
-  background: #313244;
-}
-
-.terminal-settings-option.active {
-  color: #89b4fa;
-}
-
-.terminal-settings-option .check {
-  width: 14px;
-}
-
 /* Scrollbar styling */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }

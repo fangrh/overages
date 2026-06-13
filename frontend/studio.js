@@ -9986,7 +9986,7 @@ ${h2.join(`
         if (sources.size > 0) {
           terminal.addLine("system", `Found ${sources.size} component(s) with source info:`);
           for (const [key, src] of sources) {
-            terminal.addLine("stdout", `  ${src.file}:${src.line}`, { file: src.file, line: src.line });
+            terminal.addLine("stdout", `  ${src.file}:${src.line}`);
           }
         }
       }
@@ -10173,7 +10173,6 @@ ${h2.join(`
   function init() {
     editor = window.setupMonaco(monacoContainer);
     terminal = new window.TerminalRenderer(terminalBody);
-    terminal.sourceInfoMode = sourceInfoMode;
     bridge = new window.IframeBridge(iframeViewer);
     try {
       initXterm();
@@ -10188,7 +10187,6 @@ ${h2.join(`
     window.studio = { editor, bridge, terminal, currentFile: null, openFile, jumpToLine };
     restoreWorkspace();
     initPythonEnv();
-    initSettings();
     setInterval(pollMcpCommands, 1e3);
     const savedLayout = sessionStorage.getItem("supergds-layout");
     setLayoutMode(savedLayout || "split");
@@ -10293,37 +10291,6 @@ ${h2.join(`
       } catch {
         clearStudioCookie("file");
       }
-    }
-  }
-  var sourceInfoMode = "off";
-  function initSettings() {
-    const settingsBtn = document.getElementById("terminal-settings");
-    const dropdown = document.getElementById("terminal-settings-dropdown");
-    if (!settingsBtn || !dropdown) return;
-    settingsBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      dropdown.classList.toggle("hidden");
-    });
-    document.addEventListener("click", () => {
-      dropdown.classList.add("hidden");
-    });
-    dropdown.querySelectorAll(".terminal-settings-option").forEach((el2) => {
-      el2.addEventListener("click", () => {
-        const mode = el2.getAttribute("data-mode");
-        sourceInfoMode = mode;
-        dropdown.querySelectorAll(".terminal-settings-option").forEach((opt) => {
-          opt.classList.toggle("active", opt.getAttribute("data-mode") === mode);
-        });
-        dropdown.classList.add("hidden");
-        localStorage.setItem("supergds-source-info", mode);
-      });
-    });
-    const saved = localStorage.getItem("supergds-source-info");
-    if (saved) {
-      sourceInfoMode = saved;
-      dropdown.querySelectorAll(".terminal-settings-option").forEach((opt) => {
-        opt.classList.toggle("active", opt.getAttribute("data-mode") === saved);
-      });
     }
   }
   init();
