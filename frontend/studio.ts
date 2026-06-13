@@ -254,7 +254,6 @@ class TerminalResizeHandle {
 }
 
 // DOM Elements
-const folderInput = document.getElementById('folder-input') as HTMLInputElement;
 const runBtn = document.getElementById('run-btn') as HTMLButtonElement;
 const rebuildBtn = document.getElementById('rebuild-btn') as HTMLButtonElement;
 const monacoContainer = document.getElementById('monaco-editor')!;
@@ -333,27 +332,15 @@ function setupMenuBar() {
     menuFile.classList.remove('open');
   });
 
-  menuOpenFolder.addEventListener('click', async () => {
+  menuOpenFolder.addEventListener('click', () => {
     menuFile.classList.remove('open');
+    openPathModal('open');
+  });
 
-    // Try File System Access API first (modern Chrome/Edge)
-    if (typeof (window as any).showDirectoryPicker === 'function') {
-      try {
-        const dirHandle = await (window as any).showDirectoryPicker();
-        await openWorkspaceViaHandle(dirHandle);
-        return;
-      } catch (err: any) {
-        if (err.name !== 'AbortError') {
-          terminal.addLine('system', `Error: ${err.message}`);
-        }
-        return;
-      }
-    }
-
-    // For Safari and other browsers, try webkitdirectory
-    // It will open a native folder picker dialog
-    terminal.addLine('system', `Select a folder using the dialog...`);
-    folderInput.click();
+  const menuNewProject = document.getElementById('menu-new-project');
+  menuNewProject?.addEventListener('click', () => {
+    menuFile.classList.remove('open');
+    openPathModal('new');
   });
 
   // Load recent workspaces into the submenu
@@ -436,6 +423,215 @@ async function openWorkspaceByPath(dirPath: string): Promise<void> {
   } catch (err: any) {
     terminal.addLine('stderr', `Error: ${err.message}`);
   }
+}
+
+// --- Server-side path picker modal (Open/New Project) ---
+// VS Code-style: type an absolute server path, get autocomplete suggestions
+// from /api/browse. Projects live on the server, so there is no client-side
+// folder picker here.
+interface BrowseEntry { name: string; path: string; }
+interface BrowseResponse {
+  base: string; partial: string; home: string;
+  dirs: BrowseEntry[]; error?: string;
+}
+
+let pathModalEl: HTMLElement | null = null;
+let pathModalInput: HTMLInputElement | null = null;
+let pathModalList: HTMLElement | null = null;
+let pathModalTitle: HTMLElement | null = null;
+let pathModalConfirm: HTMLButtonElement | null = null;
+let pathModalSuggestions: BrowseEntry[] = [];
+let pathModalActiveIdx = -1;
+let pathModalDebounce: ReturnType<typeof setTimeout> | null = null;
+let pathModalMode: 'open' | 'new' = 'open';
+
+function ensurePathModal(): HTMLElement {
+  if (pathModalEl) return pathModalEl;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'path-modal-overlay';
+  overlay.style.display = 'none';
+
+  const box = document.createElement('div');
+  box.className = 'path-modal';
+
+  pathModalTitle = document.createElement('div');
+  pathModalTitle.className = 'path-modal-title';
+  box.appendChild(pathModalTitle);
+
+  pathModalInput = document.createElement('input');
+  pathModalInput.className = 'path-modal-input';
+  pathModalInput.type = 'text';
+  pathModalInput.spellcheck = false;
+  pathModalInput.placeholder = '/path/to/project';
+  box.appendChild(pathModalInput);
+
+  pathModalList = document.createElement('div');
+  pathModalList.className = 'path-modal-list';
+  box.appendChild(pathModalList);
+
+  const buttons = document.createElement('div');
+  buttons.className = 'path-modal-buttons';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'path-modal-btn';
+  cancelBtn.textContent = 'Cancel';
+  pathModalConfirm = document.createElement('button');
+  pathModalConfirm.className = 'path-modal-btn primary';
+  buttons.appendChild(cancelBtn);
+  buttons.appendChild(pathModalConfirm);
+  box.appendChild(buttons);
+
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+
+  // Clicking the backdrop (not the box) closes the modal.
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) closePathModal();
+  });
+  cancelBtn.addEventListener('click', closePathModal);
+
+  pathModalInput.addEventListener('input', () => {
+    if (pathModalDebounce) clearTimeout(pathModalDebounce);
+    const v = pathModalInput!.value;
+    pathModalDebounce = setTimeout(() => queryPathSuggestions(v), 120);
+  });
+
+  pathModalInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { closePathModal(); e.preventDefault(); return; }
+    if (e.key === 'ArrowDown') { movePathSelection(1); e.preventDefault(); return; }
+    if (e.key === 'ArrowUp') { movePathSelection(-1); e.preventDefault(); return; }
+    if (e.key === 'Tab' && pathModalActiveIdx >= 0 && pathModalSuggestions[pathModalActiveIdx]) {
+      e.preventDefault();
+      acceptPathSuggestion(pathModalSuggestions[pathModalActiveIdx]);
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (pathModalActiveIdx >= 0 && pathModalSuggestions[pathModalActiveIdx]) {
+        acceptPathSuggestion(pathModalSuggestions[pathModalActiveIdx]);
+      } else {
+        confirmPathModal();
+      }
+    }
+  });
+
+  pathModalConfirm.addEventListener('click', confirmPathModal);
+
+  pathModalEl = overlay;
+  return overlay;
+}
+
+function openPathModal(mode: 'open' | 'new'): void {
+  ensurePathModal();
+  pathModalMode = mode;
+  pathModalTitle!.textContent = mode === 'open' ? 'Open Project' : 'New Project';
+  pathModalConfirm!.textContent = mode === 'open' ? 'Open' : 'Create';
+  pathModalList!.innerHTML = '';
+  pathModalSuggestions = [];
+  pathModalActiveIdx = -1;
+  pathModalInput!.value = '';
+  pathModalEl!.style.display = 'flex';
+  // Empty query returns home + its children; prefill the input with the home path.
+  queryPathSuggestions('');
+  setTimeout(() => pathModalInput!.focus(), 0);
+}
+
+function closePathModal(): void {
+  if (pathModalEl) pathModalEl.style.display = 'none';
+  if (pathModalDebounce) { clearTimeout(pathModalDebounce); pathModalDebounce = null; }
+}
+
+async function queryPathSuggestions(q: string): Promise<void> {
+  if (!pathModalList) return;
+  try {
+    const resp = await fetch(`/api/browse?q=${encodeURIComponent(q)}`);
+    const data = (await resp.json()) as BrowseResponse;
+    // Prefill the input with the home directory on first load.
+    if (q === '' && data.home && pathModalInput && pathModalInput.value === '') {
+      pathModalInput.value = data.home.endsWith('/') ? data.home : data.home + '/';
+    }
+    pathModalSuggestions = data.dirs || [];
+    pathModalActiveIdx = -1;
+    renderPathSuggestions();
+  } catch {
+    pathModalSuggestions = [];
+    pathModalActiveIdx = -1;
+    renderPathSuggestions();
+  }
+}
+
+function renderPathSuggestions(): void {
+  if (!pathModalList) return;
+  pathModalList.innerHTML = '';
+  if (pathModalSuggestions.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'path-modal-empty';
+    empty.textContent = 'No matching folders';
+    pathModalList.appendChild(empty);
+    return;
+  }
+  pathModalSuggestions.forEach((entry, idx) => {
+    const item = document.createElement('div');
+    item.className = 'path-modal-item' + (idx === pathModalActiveIdx ? ' active' : '');
+    const name = document.createElement('span');
+    name.className = 'path-modal-item-name';
+    name.textContent = entry.name;
+    const sub = document.createElement('span');
+    sub.className = 'path-modal-item-path';
+    sub.textContent = entry.path;
+    item.appendChild(name);
+    item.appendChild(sub);
+    item.addEventListener('click', () => acceptPathSuggestion(entry));
+    item.addEventListener('mouseenter', () => {
+      pathModalActiveIdx = idx;
+      renderPathSuggestions();
+    });
+    pathModalList!.appendChild(item);
+  });
+}
+
+function movePathSelection(delta: number): void {
+  if (pathModalSuggestions.length === 0) return;
+  pathModalActiveIdx = (pathModalActiveIdx + delta + pathModalSuggestions.length) % pathModalSuggestions.length;
+  renderPathSuggestions();
+  const items = pathModalList!.querySelectorAll('.path-modal-item');
+  (items[pathModalActiveIdx] as HTMLElement | undefined)?.scrollIntoView({ block: 'nearest' });
+}
+
+function acceptPathSuggestion(entry: BrowseEntry): void {
+  if (!pathModalInput) return;
+  // Trailing slash so the next keystroke lists this folder's children.
+  pathModalInput.value = entry.path.endsWith('/') ? entry.path : entry.path + '/';
+  pathModalSuggestions = [];
+  pathModalActiveIdx = -1;
+  renderPathSuggestions();
+  queryPathSuggestions(pathModalInput.value);
+  pathModalInput.focus();
+}
+
+async function confirmPathModal(): Promise<void> {
+  if (!pathModalInput) return;
+  const p = pathModalInput.value.trim().replace(/\/+$/, '');
+  if (!p) return;
+  closePathModal();
+  if (pathModalMode === 'new') {
+    try {
+      const resp = await fetch('/api/project/new', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: p }),
+      });
+      if (!resp.ok) {
+        terminal.addLine('stderr', `Failed to create project (${resp.status})`);
+        return;
+      }
+      terminal.addLine('system', `Created project: ${p}`);
+    } catch (err: any) {
+      terminal.addLine('stderr', `Error creating project: ${err.message}`);
+      return;
+    }
+  }
+  await openWorkspace(p);
 }
 
 // Sidebar toggle
@@ -638,116 +834,6 @@ function jumpToLine(line: number): void {
   }
 }
 
-async function handleFolderOpen(e: Event) {
-  const input = e.target as HTMLInputElement;
-  if (!input.files?.length) return;
-
-  // Get the folder path - try File.path first (Chrome), then webkitRelativePath
-  const firstFile = input.files[0] as any;
-  let folderPath: string;
-
-  if (firstFile.path) {
-    // Chrome/Edge - File.path gives full path to file, extract directory
-    // path is like /Users/name/project/subdir/file.py
-    // we want /Users/name/project (the root that was selected)
-    const fullPath = firstFile.path;
-    // Find where the selected folder starts - use webkitRelativePath to determine root
-    if (firstFile.webkitRelativePath) {
-      const relPath = firstFile.webkitRelativePath; // e.g., "project/subdir/file.py"
-      const folderName = relPath.split('/')[0]; // e.g., "project"
-      // The full path contains the folder name, find its position
-      const idx = fullPath.lastIndexOf(folderName);
-      if (idx > 0) {
-        folderPath = fullPath.substring(0, idx + folderName.length);
-      } else {
-        folderPath = fullPath.substring(0, fullPath.lastIndexOf('/'));
-      }
-    } else {
-      folderPath = fullPath.substring(0, fullPath.lastIndexOf('/'));
-    }
-  } else if (firstFile.webkitRelativePath) {
-    // Safari - no File.path, but we can read file contents from the FileList
-    // and send them to the server (same pattern as openWorkspaceViaHandle)
-    const relPath = firstFile.webkitRelativePath;
-    const folderName = relPath.split('/')[0];
-
-    terminal.addLine('system', `Reading files from "${folderName}"...`);
-
-    const validExts = ['py', 'json', 'ts', 'js', 'md', 'txt', 'yaml', 'yml', 'toml', 'cfg', 'ini'];
-    const files: { path: string; content: string }[] = [];
-
-    for (let i = 0; i < input.files!.length; i++) {
-      const file = input.files![i];
-      const ext = file.name.split('.').pop()?.toLowerCase();
-      if (!validExts.includes(ext || '')) continue;
-
-      // webkitRelativePath is like "folderName/subdir/file.py"
-      // Strip the top-level folder name to get "subdir/file.py"
-      const fileRelPath = file.webkitRelativePath;
-      const withoutFolder = fileRelPath.substring(fileRelPath.indexOf('/') + 1);
-
-      try {
-        const content = await file.text();
-        files.push({ path: withoutFolder, content });
-      } catch (err) {
-        console.warn(`Failed to read ${fileRelPath}:`, err);
-      }
-    }
-
-    if (files.length === 0) {
-      terminal.addLine('system', `No supported files found in folder.`);
-      return;
-    }
-
-    terminal.addLine('system', `Sending ${files.length} files to server...`);
-
-    const wsResp = await fetch('/workspace', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ workspace: folderName, files }),
-    });
-
-    if (!wsResp.ok) {
-      terminal.addLine('system', `Error: Failed to open folder (${wsResp.status})`);
-      return;
-    }
-
-    workspacePath = folderName;
-    sessionStorage.setItem('supergds-workspace', folderName);
-    sessionStorage.setItem('supergds-current-file', '');
-    terminal.addLine('system', `Opened folder: ${folderName}`);
-    await loadFileTree();
-    return;
-  } else {
-    terminal.addLine('system', `Error: Cannot determine folder path. Please use File > Open Folder.`);
-    return;
-  }
-
-  await openWorkspace(folderPath);
-}
-
-// Use File System Access API for modern directory selection
-async function openWorkspaceWithPicker() {
-  // Check if File System Access API is available
-  if (!('showDirectoryPicker' in window)) {
-    terminal.addLine('system', `Your browser doesn't support folder selection. Please use Chrome or Edge.`);
-    return;
-  }
-
-  try {
-    const dirHandle = await (window as any).showDirectoryPicker();
-    // With File System Access API, we get a DirectoryHandle
-    // We need to iterate files and send them to the server
-    // For now, use the name as workspace identifier
-    const folderPath = dirHandle.name;
-    await openWorkspace(folderPath);
-  } catch (err: any) {
-    if (err.name !== 'AbortError') {
-      terminal.addLine('system', `Error opening folder: ${err.message}`);
-    }
-  }
-}
-
 async function openWorkspace(folderPath: string) {
   workspacePath = folderPath;
   sessionStorage.setItem('supergds-workspace', folderPath);
@@ -764,75 +850,6 @@ async function openWorkspace(folderPath: string) {
   }
 
   terminal.addLine('system', `Opened folder: ${folderPath}`);
-  await loadFileTree();
-}
-
-// File System Access API - read files from DirectoryHandle and send to server
-async function openWorkspaceViaHandle(dirHandle: FileSystemDirectoryHandle) {
-  // Build file tree by iterating directory recursively
-  const files: { path: string; content: string }[] = [];
-
-  async function traverseDir(handle: FileSystemDirectoryHandle, basePath: string = '') {
-    for await (const entry of handle.values()) {
-      const entryPath = basePath ? `${basePath}/${entry.name}` : entry.name;
-
-      if (entry.kind === 'directory') {
-        if (entry.name === 'node_modules' || entry.name.startsWith('.')) {
-          continue; // Skip these directories
-        }
-        const subDir = await handle.getDirectoryHandle(entry.name);
-        await traverseDir(subDir, entryPath);
-      } else if (entry.kind === 'file') {
-        // Check extension - only include useful files
-        const ext = entry.name.split('.').pop()?.toLowerCase();
-        if (['py', 'json', 'ts', 'js', 'md', 'txt', 'yaml', 'yml', 'toml', 'cfg', 'ini'].includes(ext || '')) {
-          try {
-            const fileHandle = await handle.getFileHandle(entry.name);
-            const file = await fileHandle.getFile();
-            const content = await file.text();
-            files.push({ path: entryPath, content });
-          } catch (err) {
-            console.warn(`Failed to read file ${entryPath}:`, err);
-          }
-        }
-      }
-    }
-  }
-
-  try {
-    await traverseDir(dirHandle);
-  } catch (err) {
-    terminal.addLine('system', `Error reading directory: ${err}`);
-    return;
-  }
-
-  // Send all files to server in one request
-  terminal.addLine('system', `Sending ${files.length} files to server...`);
-
-  const wsResp = await fetch('/workspace', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      workspace: dirHandle.name,
-      files: files
-    }),
-  });
-
-  if (!wsResp.ok) {
-    terminal.addLine('system', `Error: Failed to open folder (${wsResp.status})`);
-    return;
-  }
-
-  workspacePath = dirHandle.name;
-  sessionStorage.setItem('supergds-workspace', dirHandle.name);
-
-  // Restore previously open file if any
-  const savedFile = sessionStorage.getItem('supergds-current-file');
-  if (savedFile) {
-    openFile(savedFile).catch(() => {});
-  }
-
-  terminal.addLine('system', `Opened folder: ${dirHandle.name}`);
   await loadFileTree();
 }
 
@@ -883,7 +900,7 @@ async function loadFileTree() {
   const res = await fetch('/api/files');
   if (!res.ok) {
     console.error('Failed to load files:', res.status);
-    fileTree.innerHTML = '<div style="padding:8px;color:#f38ba8;">Could not read workspace. Try File → Open Folder.</div>';
+    fileTree.innerHTML = '<div style="padding:8px;color:#f38ba8;">Could not read workspace. Try File → Open Project.</div>';
     return;
   }
 
@@ -1195,7 +1212,6 @@ export function init() {
   setupSidebar();
 
   // Event listeners
-  folderInput.addEventListener('change', handleFolderOpen);
   runBtn.addEventListener('click', handleRun);
   rebuildBtn.addEventListener('click', handleRebuild);
 
@@ -1319,12 +1335,12 @@ async function restoreWorkspace() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ workspace: '' }),
         }).catch(() => {});
-        fileTree.innerHTML = '<div style="padding:8px;color:#6c7086;">Open a folder to get started (File → Open Folder)</div>';
+        fileTree.innerHTML = '<div style="padding:8px;color:#6c7086;">Open a project to get started (File → Open Project)</div>';
       }
     }
   } catch {
     // No persisted workspace — user will open one manually
-    fileTree.innerHTML = '<div style="padding:8px;color:#6c7086;">Open a folder to get started (File → Open Folder)</div>';
+    fileTree.innerHTML = '<div style="padding:8px;color:#6c7086;">Open a project to get started (File → Open Project)</div>';
   }
 }
 

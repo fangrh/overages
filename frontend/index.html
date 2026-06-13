@@ -36,8 +36,12 @@
     <span class="menu-title">File</span>
     <div class="menu-dropdown" id="file-dropdown">
       <div class="menu-option" id="menu-open-folder">
-        <span>Open Folder</span>
+        <span>Open Project…</span>
         <span class="menu-shortcut">⌘O</span>
+      </div>
+      <div class="menu-option" id="menu-new-project">
+        <span>New Project…</span>
+        <span class="menu-shortcut">⌘N</span>
       </div>
       <div class="menu-separator"></div>
       <div class="menu-option has-submenu" id="menu-open-recent">
@@ -165,9 +169,6 @@
   </div>
 </div>
 </div><!-- /#content-row -->
-
-<!-- Hidden folder input -->
-<input type="file" id="folder-input" webkitdirectory style="display:none">
 
 <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.55.1/min/vs/loader.js"></script>
 <script>

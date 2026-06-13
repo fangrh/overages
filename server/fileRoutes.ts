@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import path from 'path';
 import fs from 'fs/promises';
+import os from 'os';
 import { setWorkspacePath, getWorkspacePath, isWithinWorkspace, storeFiles, getStoredFile, hasFileStore, getRecentWorkspaces, removeRecentWorkspace } from './workspace.js';
 
 interface WorkspaceBody {
@@ -50,6 +51,56 @@ export async function registerFileRoutes(app: FastifyInstance) {
     const { path: wsPath } = req.body as { path: string };
     if (wsPath) removeRecentWorkspace(wsPath);
     return { success: true };
+  });
+
+  // VS Code-style server-side path autocomplete.
+  // Given a partially-typed absolute path `q`, return the directories under
+  // q's parent whose name starts with the trailing segment. e.g.
+  //   q="/mn"     -> dirs under "/" starting with "mn"        (["/mnt"])
+  //   q="/mnt/"   -> all dirs under "/mnt"                    (["/mnt/c","/mnt/e",...])
+  //   q="/mnt/e/over" -> dirs under "/mnt/e" starting "over"  (["/mnt/e/overages"])
+  // An empty `q` returns the user's home directory and its children, so the
+  // picker can prefill the input with the home path.
+  app.get('/api/browse', async (req) => {
+    const raw = ((req.query as { q?: string }).q ?? '').trim();
+    const home = os.homedir();
+
+    let base: string;
+    let partial: string;
+    if (raw === '') {
+      base = home;
+      partial = '';
+    } else {
+      const text = raw.startsWith('~') ? home + raw.slice(1) : raw;
+      const ls = text.lastIndexOf('/');
+      base = ls <= 0 ? '/' : text.slice(0, ls);
+      partial = text.slice(ls + 1);
+    }
+
+    const dirs: { name: string; path: string }[] = [];
+    let error: string | undefined;
+    try {
+      const entries = await fs.readdir(base, { withFileTypes: true });
+      for (const e of entries) {
+        if (!e.isDirectory()) continue;
+        if (partial && !e.name.startsWith(partial)) continue;
+        dirs.push({ name: e.name, path: base === '/' ? `/${e.name}` : `${base}/${e.name}` });
+      }
+      dirs.sort((a, b) => a.name.localeCompare(b.name));
+    } catch (err) {
+      error = (err as NodeJS.ErrnoException).code || 'unreadable';
+    }
+    return { base, partial, home, dirs, error };
+  });
+
+  // Create a new project directory on the server, then the client opens it.
+  app.post('/api/project/new', async (req) => {
+    const { path: projPath } = req.body as { path?: string };
+    if (!projPath || !path.isAbsolute(projPath)) {
+      throw new Error('absolute project path required');
+    }
+    await fs.mkdir(projPath, { recursive: true });
+    return { success: true, path: projPath };
   });
 
   app.get('/files/*', async (req, reply) => {

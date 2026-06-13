@@ -9325,7 +9325,6 @@ ${h2.join(`
       return this.dragging;
     }
   };
-  var folderInput = document.getElementById("folder-input");
   var runBtn = document.getElementById("run-btn");
   var rebuildBtn = document.getElementById("rebuild-btn");
   var monacoContainer = document.getElementById("monaco-editor");
@@ -9387,22 +9386,14 @@ ${h2.join(`
     document.addEventListener("click", () => {
       menuFile.classList.remove("open");
     });
-    menuOpenFolder.addEventListener("click", async () => {
+    menuOpenFolder.addEventListener("click", () => {
       menuFile.classList.remove("open");
-      if (typeof window.showDirectoryPicker === "function") {
-        try {
-          const dirHandle = await window.showDirectoryPicker();
-          await openWorkspaceViaHandle(dirHandle);
-          return;
-        } catch (err) {
-          if (err.name !== "AbortError") {
-            terminal.addLine("system", `Error: ${err.message}`);
-          }
-          return;
-        }
-      }
-      terminal.addLine("system", `Select a folder using the dialog...`);
-      folderInput.click();
+      openPathModal("open");
+    });
+    const menuNewProject = document.getElementById("menu-new-project");
+    menuNewProject?.addEventListener("click", () => {
+      menuFile.classList.remove("open");
+      openPathModal("new");
     });
     loadRecentWorkspaces();
   }
@@ -9470,6 +9461,195 @@ ${h2.join(`
     } catch (err) {
       terminal.addLine("stderr", `Error: ${err.message}`);
     }
+  }
+  var pathModalEl = null;
+  var pathModalInput = null;
+  var pathModalList = null;
+  var pathModalTitle = null;
+  var pathModalConfirm = null;
+  var pathModalSuggestions = [];
+  var pathModalActiveIdx = -1;
+  var pathModalDebounce = null;
+  var pathModalMode = "open";
+  function ensurePathModal() {
+    if (pathModalEl) return pathModalEl;
+    const overlay = document.createElement("div");
+    overlay.className = "path-modal-overlay";
+    overlay.style.display = "none";
+    const box = document.createElement("div");
+    box.className = "path-modal";
+    pathModalTitle = document.createElement("div");
+    pathModalTitle.className = "path-modal-title";
+    box.appendChild(pathModalTitle);
+    pathModalInput = document.createElement("input");
+    pathModalInput.className = "path-modal-input";
+    pathModalInput.type = "text";
+    pathModalInput.spellcheck = false;
+    pathModalInput.placeholder = "/path/to/project";
+    box.appendChild(pathModalInput);
+    pathModalList = document.createElement("div");
+    pathModalList.className = "path-modal-list";
+    box.appendChild(pathModalList);
+    const buttons = document.createElement("div");
+    buttons.className = "path-modal-buttons";
+    const cancelBtn = document.createElement("button");
+    cancelBtn.className = "path-modal-btn";
+    cancelBtn.textContent = "Cancel";
+    pathModalConfirm = document.createElement("button");
+    pathModalConfirm.className = "path-modal-btn primary";
+    buttons.appendChild(cancelBtn);
+    buttons.appendChild(pathModalConfirm);
+    box.appendChild(buttons);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) closePathModal();
+    });
+    cancelBtn.addEventListener("click", closePathModal);
+    pathModalInput.addEventListener("input", () => {
+      if (pathModalDebounce) clearTimeout(pathModalDebounce);
+      const v2 = pathModalInput.value;
+      pathModalDebounce = setTimeout(() => queryPathSuggestions(v2), 120);
+    });
+    pathModalInput.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        closePathModal();
+        e.preventDefault();
+        return;
+      }
+      if (e.key === "ArrowDown") {
+        movePathSelection(1);
+        e.preventDefault();
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        movePathSelection(-1);
+        e.preventDefault();
+        return;
+      }
+      if (e.key === "Tab" && pathModalActiveIdx >= 0 && pathModalSuggestions[pathModalActiveIdx]) {
+        e.preventDefault();
+        acceptPathSuggestion(pathModalSuggestions[pathModalActiveIdx]);
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (pathModalActiveIdx >= 0 && pathModalSuggestions[pathModalActiveIdx]) {
+          acceptPathSuggestion(pathModalSuggestions[pathModalActiveIdx]);
+        } else {
+          confirmPathModal();
+        }
+      }
+    });
+    pathModalConfirm.addEventListener("click", confirmPathModal);
+    pathModalEl = overlay;
+    return overlay;
+  }
+  function openPathModal(mode) {
+    ensurePathModal();
+    pathModalMode = mode;
+    pathModalTitle.textContent = mode === "open" ? "Open Project" : "New Project";
+    pathModalConfirm.textContent = mode === "open" ? "Open" : "Create";
+    pathModalList.innerHTML = "";
+    pathModalSuggestions = [];
+    pathModalActiveIdx = -1;
+    pathModalInput.value = "";
+    pathModalEl.style.display = "flex";
+    queryPathSuggestions("");
+    setTimeout(() => pathModalInput.focus(), 0);
+  }
+  function closePathModal() {
+    if (pathModalEl) pathModalEl.style.display = "none";
+    if (pathModalDebounce) {
+      clearTimeout(pathModalDebounce);
+      pathModalDebounce = null;
+    }
+  }
+  async function queryPathSuggestions(q2) {
+    if (!pathModalList) return;
+    try {
+      const resp = await fetch(`/api/browse?q=${encodeURIComponent(q2)}`);
+      const data = await resp.json();
+      if (q2 === "" && data.home && pathModalInput && pathModalInput.value === "") {
+        pathModalInput.value = data.home.endsWith("/") ? data.home : data.home + "/";
+      }
+      pathModalSuggestions = data.dirs || [];
+      pathModalActiveIdx = -1;
+      renderPathSuggestions();
+    } catch {
+      pathModalSuggestions = [];
+      pathModalActiveIdx = -1;
+      renderPathSuggestions();
+    }
+  }
+  function renderPathSuggestions() {
+    if (!pathModalList) return;
+    pathModalList.innerHTML = "";
+    if (pathModalSuggestions.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "path-modal-empty";
+      empty.textContent = "No matching folders";
+      pathModalList.appendChild(empty);
+      return;
+    }
+    pathModalSuggestions.forEach((entry, idx) => {
+      const item = document.createElement("div");
+      item.className = "path-modal-item" + (idx === pathModalActiveIdx ? " active" : "");
+      const name = document.createElement("span");
+      name.className = "path-modal-item-name";
+      name.textContent = entry.name;
+      const sub = document.createElement("span");
+      sub.className = "path-modal-item-path";
+      sub.textContent = entry.path;
+      item.appendChild(name);
+      item.appendChild(sub);
+      item.addEventListener("click", () => acceptPathSuggestion(entry));
+      item.addEventListener("mouseenter", () => {
+        pathModalActiveIdx = idx;
+        renderPathSuggestions();
+      });
+      pathModalList.appendChild(item);
+    });
+  }
+  function movePathSelection(delta) {
+    if (pathModalSuggestions.length === 0) return;
+    pathModalActiveIdx = (pathModalActiveIdx + delta + pathModalSuggestions.length) % pathModalSuggestions.length;
+    renderPathSuggestions();
+    const items = pathModalList.querySelectorAll(".path-modal-item");
+    items[pathModalActiveIdx]?.scrollIntoView({ block: "nearest" });
+  }
+  function acceptPathSuggestion(entry) {
+    if (!pathModalInput) return;
+    pathModalInput.value = entry.path.endsWith("/") ? entry.path : entry.path + "/";
+    pathModalSuggestions = [];
+    pathModalActiveIdx = -1;
+    renderPathSuggestions();
+    queryPathSuggestions(pathModalInput.value);
+    pathModalInput.focus();
+  }
+  async function confirmPathModal() {
+    if (!pathModalInput) return;
+    const p = pathModalInput.value.trim().replace(/\/+$/, "");
+    if (!p) return;
+    closePathModal();
+    if (pathModalMode === "new") {
+      try {
+        const resp = await fetch("/api/project/new", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: p })
+        });
+        if (!resp.ok) {
+          terminal.addLine("stderr", `Failed to create project (${resp.status})`);
+          return;
+        }
+        terminal.addLine("system", `Created project: ${p}`);
+      } catch (err) {
+        terminal.addLine("stderr", `Error creating project: ${err.message}`);
+        return;
+      }
+    }
+    await openWorkspace(p);
   }
   function setupSidebar() {
     function toggleSidebar() {
@@ -9625,70 +9805,6 @@ ${h2.join(`
       }]);
     }
   }
-  async function handleFolderOpen(e) {
-    const input = e.target;
-    if (!input.files?.length) return;
-    const firstFile = input.files[0];
-    let folderPath;
-    if (firstFile.path) {
-      const fullPath = firstFile.path;
-      if (firstFile.webkitRelativePath) {
-        const relPath = firstFile.webkitRelativePath;
-        const folderName = relPath.split("/")[0];
-        const idx = fullPath.lastIndexOf(folderName);
-        if (idx > 0) {
-          folderPath = fullPath.substring(0, idx + folderName.length);
-        } else {
-          folderPath = fullPath.substring(0, fullPath.lastIndexOf("/"));
-        }
-      } else {
-        folderPath = fullPath.substring(0, fullPath.lastIndexOf("/"));
-      }
-    } else if (firstFile.webkitRelativePath) {
-      const relPath = firstFile.webkitRelativePath;
-      const folderName = relPath.split("/")[0];
-      terminal.addLine("system", `Reading files from "${folderName}"...`);
-      const validExts = ["py", "json", "ts", "js", "md", "txt", "yaml", "yml", "toml", "cfg", "ini"];
-      const files = [];
-      for (let i = 0; i < input.files.length; i++) {
-        const file = input.files[i];
-        const ext = file.name.split(".").pop()?.toLowerCase();
-        if (!validExts.includes(ext || "")) continue;
-        const fileRelPath = file.webkitRelativePath;
-        const withoutFolder = fileRelPath.substring(fileRelPath.indexOf("/") + 1);
-        try {
-          const content = await file.text();
-          files.push({ path: withoutFolder, content });
-        } catch (err) {
-          console.warn(`Failed to read ${fileRelPath}:`, err);
-        }
-      }
-      if (files.length === 0) {
-        terminal.addLine("system", `No supported files found in folder.`);
-        return;
-      }
-      terminal.addLine("system", `Sending ${files.length} files to server...`);
-      const wsResp = await fetch("/workspace", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workspace: folderName, files })
-      });
-      if (!wsResp.ok) {
-        terminal.addLine("system", `Error: Failed to open folder (${wsResp.status})`);
-        return;
-      }
-      workspacePath = folderName;
-      sessionStorage.setItem("supergds-workspace", folderName);
-      sessionStorage.setItem("supergds-current-file", "");
-      terminal.addLine("system", `Opened folder: ${folderName}`);
-      await loadFileTree();
-      return;
-    } else {
-      terminal.addLine("system", `Error: Cannot determine folder path. Please use File > Open Folder.`);
-      return;
-    }
-    await openWorkspace(folderPath);
-  }
   async function openWorkspace(folderPath) {
     workspacePath = folderPath;
     sessionStorage.setItem("supergds-workspace", folderPath);
@@ -9702,61 +9818,6 @@ ${h2.join(`
       return;
     }
     terminal.addLine("system", `Opened folder: ${folderPath}`);
-    await loadFileTree();
-  }
-  async function openWorkspaceViaHandle(dirHandle) {
-    const files = [];
-    async function traverseDir(handle, basePath = "") {
-      for await (const entry of handle.values()) {
-        const entryPath = basePath ? `${basePath}/${entry.name}` : entry.name;
-        if (entry.kind === "directory") {
-          if (entry.name === "node_modules" || entry.name.startsWith(".")) {
-            continue;
-          }
-          const subDir = await handle.getDirectoryHandle(entry.name);
-          await traverseDir(subDir, entryPath);
-        } else if (entry.kind === "file") {
-          const ext = entry.name.split(".").pop()?.toLowerCase();
-          if (["py", "json", "ts", "js", "md", "txt", "yaml", "yml", "toml", "cfg", "ini"].includes(ext || "")) {
-            try {
-              const fileHandle = await handle.getFileHandle(entry.name);
-              const file = await fileHandle.getFile();
-              const content = await file.text();
-              files.push({ path: entryPath, content });
-            } catch (err) {
-              console.warn(`Failed to read file ${entryPath}:`, err);
-            }
-          }
-        }
-      }
-    }
-    try {
-      await traverseDir(dirHandle);
-    } catch (err) {
-      terminal.addLine("system", `Error reading directory: ${err}`);
-      return;
-    }
-    terminal.addLine("system", `Sending ${files.length} files to server...`);
-    const wsResp = await fetch("/workspace", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        workspace: dirHandle.name,
-        files
-      })
-    });
-    if (!wsResp.ok) {
-      terminal.addLine("system", `Error: Failed to open folder (${wsResp.status})`);
-      return;
-    }
-    workspacePath = dirHandle.name;
-    sessionStorage.setItem("supergds-workspace", dirHandle.name);
-    const savedFile = sessionStorage.getItem("supergds-current-file");
-    if (savedFile) {
-      openFile(savedFile).catch(() => {
-      });
-    }
-    terminal.addLine("system", `Opened folder: ${dirHandle.name}`);
     await loadFileTree();
   }
   async function loadPythonEnvironments() {
@@ -9798,7 +9859,7 @@ ${h2.join(`
     const res = await fetch("/api/files");
     if (!res.ok) {
       console.error("Failed to load files:", res.status);
-      fileTree.innerHTML = '<div style="padding:8px;color:#f38ba8;">Could not read workspace. Try File \u2192 Open Folder.</div>';
+      fileTree.innerHTML = '<div style="padding:8px;color:#f38ba8;">Could not read workspace. Try File \u2192 Open Project.</div>';
       return;
     }
     const { files } = await res.json();
@@ -10056,7 +10117,6 @@ ${h2.join(`
     setupBottomPanel();
     setupMenuBar();
     setupSidebar();
-    folderInput.addEventListener("change", handleFolderOpen);
     runBtn.addEventListener("click", handleRun);
     rebuildBtn.addEventListener("click", handleRebuild);
     window.studio = { editor, bridge, terminal, currentFile: null, openFile, jumpToLine };
@@ -10152,11 +10212,11 @@ ${h2.join(`
             body: JSON.stringify({ workspace: "" })
           }).catch(() => {
           });
-          fileTree.innerHTML = '<div style="padding:8px;color:#6c7086;">Open a folder to get started (File \u2192 Open Folder)</div>';
+          fileTree.innerHTML = '<div style="padding:8px;color:#6c7086;">Open a project to get started (File \u2192 Open Project)</div>';
         }
       }
     } catch {
-      fileTree.innerHTML = '<div style="padding:8px;color:#6c7086;">Open a folder to get started (File \u2192 Open Folder)</div>';
+      fileTree.innerHTML = '<div style="padding:8px;color:#6c7086;">Open a project to get started (File \u2192 Open Project)</div>';
     }
   }
   var sourceInfoMode = "off";
