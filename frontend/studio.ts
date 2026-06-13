@@ -1,3 +1,6 @@
+import { Terminal } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
+
 // Use window-based access for classes exposed by other chunks
 // These are set by their respective modules after loading
 
@@ -934,16 +937,8 @@ function initXterm(): void {
   const container = document.getElementById('terminal-xterm');
   if (!container) return;
 
-  // Dynamically import xterm from the CDN-loaded global (or bundled)
-  // xterm is loaded via CDN in index.html
-  const xtermLib = (window as any).xtermLib;
-  if (!xtermLib || typeof xtermLib.Terminal !== 'function') {
-    // CDN failed to load — show a helpful message instead of blank panel
-    container.innerHTML = '<div style="padding:12px;color:#f38ba8;font:13px/1.5 \'Cascadia Code\',monospace;">⚠ Terminal unavailable — xterm.js failed to load from CDN.<br><span style="color:#6c7086;">Check your internet connection and reload the page.</span></div>';
-    return;
-  }
-
-  xterm = new xtermLib.Terminal({
+  // xterm.js is bundled locally via esbuild (no CDN dependency)
+  xterm = new Terminal({
     cursorBlink: true,
     fontSize: 13,
     fontFamily: "'Cascadia Code', 'Fira Code', monospace",
@@ -955,7 +950,7 @@ function initXterm(): void {
     },
   });
 
-  xtermFitAddon = new xtermLib.FitAddon();
+  xtermFitAddon = new FitAddon();
   xterm.loadAddon(xtermFitAddon);
   xterm.open(container);
 

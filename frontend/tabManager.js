@@ -265,3 +265,4 @@
   };
   window.TabManager = TabManager;
 })();
+//# sourceMappingURL=tabManager.js.map

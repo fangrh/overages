@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build:frontend": "esbuild frontend/studio.ts frontend/monacoSetup.ts frontend/iframeBridge.ts frontend/terminal.ts frontend/tabManager.ts --bundle --platform=browser --outdir=frontend --format=iife --sourcemap --external:monaco-editor --allow-overwrite",
+    "build:frontend": "esbuild frontend/studio.ts frontend/monacoSetup.ts frontend/iframeBridge.ts frontend/terminal.ts frontend/tabManager.ts frontend/xtermCss.ts --bundle --platform=browser --outdir=frontend --format=iife --sourcemap --external:monaco-editor --allow-overwrite",
     "dev": "npm run build:frontend && tsx watch server/index.ts",
     "build": "tsc",
     "start": "node dist/server/index.js",

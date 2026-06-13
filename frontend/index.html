@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>overGDS Studio</title>
 <link rel="stylesheet" href="/studio.css">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm/css/xterm.css">
+<link rel="stylesheet" href="/xterm.css">
 </head>
 <body>
 <!-- Menu Bar — full-width top bar (VS Code style) -->
@@ -168,20 +168,9 @@
 
 <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.55.1/min/vs/loader.js"></script>
 <script>
-  // Load xterm.js from CDN and expose as window.xtermLib
-  var xtermScript = document.createElement('script');
-  xtermScript.src = 'https://cdn.jsdelivr.net/npm/@xterm/xterm/lib/xterm.js';
-  xtermScript.onload = function() {
-    var fitScript = document.createElement('script');
-    fitScript.src = 'https://cdn.jsdelivr.net/npm/@xterm/addon-fit/lib/addon-fit.js';
-    fitScript.onload = function() {
-      // Expose as global for studio.ts to use
-      window.xtermLib = { Terminal: window.Terminal, FitAddon: window.FitAddon };
-      loadMonaco();
-    };
-    document.head.appendChild(fitScript);
-  };
-  document.head.appendChild(xtermScript);
+  // xterm.js is bundled locally via esbuild (see frontend/studio.ts); no CDN needed.
+  // Monaco is still loaded from the CDN below.
+  loadMonaco();
 
   function loadMonaco() {
     require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.55.1/min/vs' } });
