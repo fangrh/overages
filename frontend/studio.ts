@@ -1034,7 +1034,8 @@ async function handleRun() {
   terminal.clear();
   const pythonPath = pythonEnvSelect?.value;
   const pythonPathParam = pythonPath ? `&pythonPath=${encodeURIComponent(pythonPath)}` : '';
-  terminal.addLine('system', `$ python ${currentFile}`);
+  const envLabel = pythonEnvSelect?.selectedOptions[0]?.textContent?.trim() || 'default';
+  terminal.addLine('system', `$ python (${envLabel}) ${currentFile}`);
 
   let completed = false;
   const es = new EventSource(`/api/run?pythonFile=${encodeURIComponent(currentFile)}${pythonPathParam}`);
@@ -1059,9 +1060,25 @@ async function handleRun() {
         }
       }
       if (sources.size > 0) {
-        terminal.addLine('system', `Found ${sources.size} component(s) with source info:`);
+        terminal.addLine('system', `Provenance captured — ${sources.size} component(s) with source info:`);
         for (const [key, src] of sources) {
           terminal.addLine('stdout', `  ${src.file}:${src.line}`);
+        }
+      } else if (data.mode !== 'full') {
+        // Provenance sidecar wasn't generated. Two distinct causes: (1) the run
+        // used a Python env without the provenance-enabled gdsfactory fork, or
+        // (2) the 'gds' env WAS used but the script builds geometry through a
+        // path the fork doesn't yet instrument. Tell the user which one it is
+        // instead of silently presenting a build with no source attribution.
+        terminal.addLine('stderr', '⚠ Provenance not captured for this build.');
+        const usedGds = /gds[\\/]/.test(pythonPath) || envLabel === 'gds';
+        if (usedGds) {
+          terminal.addLine('stderr', '   The "gds" env was used, but this script may build geometry through a path the');
+          terminal.addLine('stderr', '   provenance fork does not yet instrument (e.g. raw klayout calls). Use gdsfactory');
+          terminal.addLine('stderr', '   primitives (gf.Component/add_polygon, gf.boolean) for source attribution.');
+        } else {
+          terminal.addLine('stderr', `   Ran with env "${envLabel}", which lacks the provenance-enabled gdsfactory.`);
+          terminal.addLine('stderr', '   Select "gds" in the Python Environment dropdown (toolbar) and re-run.');
         }
       }
     }

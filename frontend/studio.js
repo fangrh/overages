@@ -9961,7 +9961,8 @@ ${h2.join(`
     terminal.clear();
     const pythonPath = pythonEnvSelect?.value;
     const pythonPathParam = pythonPath ? `&pythonPath=${encodeURIComponent(pythonPath)}` : "";
-    terminal.addLine("system", `$ python ${currentFile}`);
+    const envLabel = pythonEnvSelect?.selectedOptions[0]?.textContent?.trim() || "default";
+    terminal.addLine("system", `$ python (${envLabel}) ${currentFile}`);
     let completed = false;
     const es2 = new EventSource(`/api/run?pythonFile=${encodeURIComponent(currentFile)}${pythonPathParam}`);
     es2.addEventListener("start", (e) => terminal.addLine("stdout", JSON.parse(e.data).status));
@@ -9984,9 +9985,20 @@ ${h2.join(`
           }
         }
         if (sources.size > 0) {
-          terminal.addLine("system", `Found ${sources.size} component(s) with source info:`);
+          terminal.addLine("system", `Provenance captured \u2014 ${sources.size} component(s) with source info:`);
           for (const [key, src] of sources) {
             terminal.addLine("stdout", `  ${src.file}:${src.line}`);
+          }
+        } else if (data.mode !== "full") {
+          terminal.addLine("stderr", "\u26A0 Provenance not captured for this build.");
+          const usedGds = /gds[\\/]/.test(pythonPath) || envLabel === "gds";
+          if (usedGds) {
+            terminal.addLine("stderr", '   The "gds" env was used, but this script may build geometry through a path the');
+            terminal.addLine("stderr", "   provenance fork does not yet instrument (e.g. raw klayout calls). Use gdsfactory");
+            terminal.addLine("stderr", "   primitives (gf.Component/add_polygon, gf.boolean) for source attribution.");
+          } else {
+            terminal.addLine("stderr", `   Ran with env "${envLabel}", which lacks the provenance-enabled gdsfactory.`);
+            terminal.addLine("stderr", '   Select "gds" in the Python Environment dropdown (toolbar) and re-run.');
           }
         }
       }
