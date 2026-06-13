@@ -9261,6 +9261,70 @@ ${h2.join(`
       this.handle.style.left = `${editorRect.width}px`;
     }
   };
+  var TerminalResizeHandle = class {
+    handle;
+    terminal;
+    container;
+    dragging = false;
+    startY = 0;
+    startHeight = 0;
+    constructor(handleId, terminalId, containerId) {
+      this.handle = document.getElementById(handleId);
+      this.terminal = document.getElementById(terminalId);
+      this.container = document.getElementById(containerId);
+      this.setupEvents();
+    }
+    setupEvents() {
+      this.handle.addEventListener("pointerdown", (e) => {
+        this.dragging = true;
+        this.startY = e.clientY;
+        this.startHeight = this.terminal.getBoundingClientRect().height;
+        this.handle.classList.add("dragging");
+        this.handle.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        e.stopPropagation();
+      });
+      this.handle.addEventListener("pointermove", (e) => {
+        if (!this.dragging) return;
+        const dy = this.startY - e.clientY;
+        const newHeight = this.startHeight + dy;
+        const containerHeight = this.container.getBoundingClientRect().height;
+        const minHeight = 80;
+        const maxHeight = containerHeight - 120;
+        const clamped = Math.max(minHeight, Math.min(maxHeight, newHeight));
+        this.terminal.style.height = `${clamped}px`;
+        if (xtermFitAddon && xterm) {
+          try {
+            xtermFitAddon.fit();
+          } catch {
+          }
+        }
+      });
+      const endDrag = (e) => {
+        if (!this.dragging) return;
+        this.dragging = false;
+        this.handle.classList.remove("dragging");
+        this.handle.releasePointerCapture(e.pointerId);
+        if (xtermFitAddon && xterm) {
+          try {
+            xtermFitAddon.fit();
+            const dims = xtermFitAddon.proposeDimensions();
+            if (dims && xtermWs?.readyState === WebSocket.OPEN) {
+              xtermWs.send(JSON.stringify({ type: "resize", cols: dims.cols, rows: dims.rows }));
+            }
+          } catch {
+          }
+        }
+        const iframe = document.getElementById("gds-viewer");
+        iframe?.contentWindow?.postMessage({ type: "resize" }, "*");
+      };
+      this.handle.addEventListener("pointerup", endDrag);
+      this.handle.addEventListener("pointercancel", endDrag);
+    }
+    isDragging() {
+      return this.dragging;
+    }
+  };
   var folderInput = document.getElementById("folder-input");
   var runBtn = document.getElementById("run-btn");
   var rebuildBtn = document.getElementById("rebuild-btn");
@@ -10060,6 +10124,7 @@ ${h2.join(`
       }
     });
     const resizeHandle = new ResizeHandle("resize-handle", "editor-pane", "viewer-pane");
+    new TerminalResizeHandle("terminal-resize-handle", "terminal", "main-content");
     window.addEventListener("resize", () => {
       const handle = document.getElementById("resize-handle");
       const editorPane = document.getElementById("editor-pane");

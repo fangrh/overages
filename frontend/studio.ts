@@ -175,6 +175,84 @@ class ResizeHandle {
   }
 }
 
+/**
+ * Vertical resize handle for the bottom console (#terminal).
+ * Drag the handle up to grow the console, down to shrink it.
+ * #panels above is flex:1, so it absorbs the space given up or taken back.
+ * Monaco auto-relayouts (automaticLayout:true); xterm is refit and the
+ * viewer map is notified on drag.
+ */
+class TerminalResizeHandle {
+  private handle: HTMLElement;
+  private terminal: HTMLElement;
+  private container: HTMLElement;
+  private dragging = false;
+  private startY = 0;
+  private startHeight = 0;
+
+  constructor(handleId: string, terminalId: string, containerId: string) {
+    this.handle = document.getElementById(handleId)!;
+    this.terminal = document.getElementById(terminalId)!;
+    this.container = document.getElementById(containerId)!;
+    this.setupEvents();
+  }
+
+  private setupEvents(): void {
+    this.handle.addEventListener('pointerdown', (e) => {
+      this.dragging = true;
+      this.startY = e.clientY;
+      this.startHeight = this.terminal.getBoundingClientRect().height;
+      this.handle.classList.add('dragging');
+      this.handle.setPointerCapture(e.pointerId);
+      e.preventDefault();
+      e.stopPropagation();
+    });
+
+    this.handle.addEventListener('pointermove', (e) => {
+      if (!this.dragging) return;
+      // Dragging the handle UP (negative dy) grows the console.
+      const dy = this.startY - e.clientY;
+      const newHeight = this.startHeight + dy;
+      const containerHeight = this.container.getBoundingClientRect().height;
+      const minHeight = 80;             // header + a few terminal rows
+      const maxHeight = containerHeight - 120; // leave room for editor/viewer
+      const clamped = Math.max(minHeight, Math.min(maxHeight, newHeight));
+      this.terminal.style.height = `${clamped}px`;
+      // Refit xterm live so glyphs reflow during the drag
+      if (xtermFitAddon && xterm) {
+        try { xtermFitAddon.fit(); } catch {}
+      }
+    });
+
+    const endDrag = (e: PointerEvent) => {
+      if (!this.dragging) return;
+      this.dragging = false;
+      this.handle.classList.remove('dragging');
+      this.handle.releasePointerCapture(e.pointerId);
+      // Final refit + tell the pty the new terminal dimensions
+      if (xtermFitAddon && xterm) {
+        try {
+          xtermFitAddon.fit();
+          const dims = xtermFitAddon.proposeDimensions();
+          if (dims && xtermWs?.readyState === WebSocket.OPEN) {
+            xtermWs.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
+          }
+        } catch {}
+      }
+      // Notify the viewer iframe to relayout its map (if visible)
+      const iframe = document.getElementById('gds-viewer') as HTMLIFrameElement;
+      iframe?.contentWindow?.postMessage({ type: 'resize' }, '*');
+    };
+
+    this.handle.addEventListener('pointerup', endDrag);
+    this.handle.addEventListener('pointercancel', endDrag);
+  }
+
+  isDragging(): boolean {
+    return this.dragging;
+  }
+}
+
 // DOM Elements
 const folderInput = document.getElementById('folder-input') as HTMLInputElement;
 const runBtn = document.getElementById('run-btn') as HTMLButtonElement;
@@ -1211,6 +1289,8 @@ export function init() {
 
   // Setup resize handle (only in split mode)
   const resizeHandle = new ResizeHandle('resize-handle', 'editor-pane', 'viewer-pane');
+  // Vertical resize handle for the bottom console panel
+  new TerminalResizeHandle('terminal-resize-handle', 'terminal', 'main-content');
   window.addEventListener('resize', () => {
     const handle = document.getElementById('resize-handle');
     const editorPane = document.getElementById('editor-pane');
