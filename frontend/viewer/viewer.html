@@ -47,13 +47,9 @@ body { display: flex; background: #1a1a2e; font-family: -apple-system, BlinkMacS
 .panel-tab-add-option { padding: 6px 12px; font-size: 12px; color: #cdd6f4; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: background 0.1s; }
 .panel-tab-add-option:hover { background: #313244; color: #89b4fa; }
 .panel-tab-add-empty { padding: 8px 12px; font-size: 11px; color: #585b70; font-style: italic; text-align: center; }
-#claude-mode { background: #1e1e2e; color: #cdd6f4; border: 1px solid #313244; border-radius: 4px; padding: 2px 6px; font-size: 11px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; cursor: pointer; outline: none; }
-#claude-mode:hover { border-color: #585b70; }
-#claude-mode option { background: #1e1e2e; color: #cdd6f4; }
 #console-body { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 #source-panel { flex: 1; overflow-y: auto; padding: 8px 12px; }
 #info-panel { flex: 1; overflow-y: auto; padding: 8px 12px; }
-#claude-panel { flex: 1; overflow-y: auto; padding: 8px 12px; }
 .source-link { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 8px; border: 0; border-left: 3px solid transparent; background: transparent; color: #cdd6f4; cursor: pointer; font: 12px/1.5 'Cascadia Code', 'Fira Code', 'Consolas', monospace; text-align: left; }
 .source-link:hover { background: #313244; border-left-color: #89b4fa; }
 .source-link.primary { background: rgba(137, 180, 250, 0.08); border-left-color: #89b4fa; }
@@ -145,26 +141,12 @@ body { display: flex; background: #1a1a2e; font-family: -apple-system, BlinkMacS
         <div id="console-header">
             <span class="tab-bar" style="display:flex;align-items:center;gap:2px;"></span>
             <span style="display:flex;align-items:center;gap:6px;">
-                <select id="claude-mode" title="Claude Code communication mode">
-                    <option value="auto">Auto</option>
-                    <option value="clipboard">Clipboard</option>
-                    <option value="off">Off</option>
-                </select>
                 <span onclick="toggleConsole()" title="Collapse" style="cursor:pointer;color:#6c7086;font-size:14px;">&#9660;</span>
             </span>
         </div>
         <div id="console-body">
             <div id="source-panel"><p class="placeholder">Click a polygon to inspect source</p></div>
             <div id="info-panel"><p class="placeholder">Click a polygon to inspect</p></div>
-            <div id="claude-panel" style="display:none;">
-                <div id="claude-chat" style="display:flex;flex-direction:column;height:100%;">
-                    <div id="claude-messages" style="flex:1;overflow-y:auto;padding:4px 0;"></div>
-                    <div style="display:flex;gap:4px;padding-top:4px;border-top:1px solid #313244;">
-                        <input id="claude-input" type="text" placeholder="Ask about the layout..." style="flex:1;background:#11111b;border:1px solid #313244;color:#cdd6f4;padding:4px 8px;border-radius:3px;font:12px/1.4 'Cascadia Code','Fira Code',monospace;outline:none;">
-                        <button id="claude-send" style="background:#89b4fa;color:#1e1e2e;border:none;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:11px;font-weight:600;">Send</button>
-                    </div>
-                </div>
-            </div>
         </div>
     </div>
 </div>
@@ -581,11 +563,9 @@ function onSelectionChanged() {
 }
 
 function postSelectedComponents(features) {
-    var mode = document.getElementById('claude-mode').value;
     var msg = {
         type: 'selectComponents',
-        components: componentsFromFeatures(features),
-        claudeMode: mode
+        components: componentsFromFeatures(features)
     };
     if (vscode) {
         vscode.postMessage(msg);
@@ -1592,7 +1572,6 @@ function setupViewerTabs() {
 
     var sourcePanel = document.getElementById('source-panel');
     var infoPanel = document.getElementById('info-panel');
-    var claudePanel = document.getElementById('claude-panel');
 
     viewerTabManager.addTab('source', 'Source', sourcePanel, {
         active: true,
@@ -1601,15 +1580,6 @@ function setupViewerTabs() {
 
     viewerTabManager.addTab('info', 'Info', infoPanel, {
         onActivate: function() { activeTab = 'info'; }
-    });
-
-    viewerTabManager.addTab('claude', 'Claude', claudePanel, {
-        onActivate: function() {
-            activeTab = 'claude';
-            // Focus input when switching to Claude tab
-            var input = document.getElementById('claude-input');
-            if (input) setTimeout(function() { input.focus(); }, 100);
-        }
     });
 
     // === Available tabs (shown in "+" dropdown) ===
@@ -1651,31 +1621,6 @@ function setupViewerTabs() {
         return { el: panel };
     }, '❓');
 
-    // Setup Claude chat send
-    var claudeInput = document.getElementById('claude-input');
-    var claudeSend = document.getElementById('claude-send');
-    function sendClaudeMessage() {
-        var text = claudeInput.value.trim();
-        if (!text) return;
-        appendClaudeMessage('user', text);
-        claudeInput.value = '';
-        // Post to parent for iframeBridge → MCP
-        window.parent.postMessage({ type: 'askClaude', question: text }, '*');
-    }
-    claudeSend.addEventListener('click', sendClaudeMessage);
-    claudeInput.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') sendClaudeMessage();
-    });
-}
-
-function appendClaudeMessage(role, text) {
-    var msgs = document.getElementById('claude-messages');
-    var div = document.createElement('div');
-    div.style.cssText = 'padding:3px 0;font-size:12px;line-height:1.4;' +
-        (role === 'user' ? 'color:#89b4fa;' : 'color:#a6e3a1;');
-    div.textContent = (role === 'user' ? '▸ ' : '◂ ') + text;
-    msgs.appendChild(div);
-    msgs.scrollTop = msgs.scrollHeight;
 }
 
 function addKV(parent, key, val, hl) {

@@ -102,25 +102,30 @@ export class TabManager {
     labelSpan.textContent = label;
     btn.appendChild(labelSpan);
 
-    // Close button — shown if onClose is provided OR if tab was dynamically added
-    const tab = this.availableTabs.get(id);
-    const canClose = opts?.onClose || tab;
-    if (canClose) {
-      const closeBtn = document.createElement('span');
-      closeBtn.className = 'panel-tab-close';
-      closeBtn.textContent = '×';
-      closeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (opts?.onClose) {
-          opts.onClose();
-        } else {
-          // Dynamically-added tab: remove it
-          this.removeTab(id);
-          this.refreshAddMenu();
+    // Close button — always shown so user can close any tab
+    const closeBtn = document.createElement('span');
+    closeBtn.className = 'panel-tab-close';
+    closeBtn.textContent = '×';
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (opts?.onClose) {
+        opts.onClose();
+      } else {
+        // Remove tab and make it re-addable via "+"
+        this.removeTab(id);
+        // If not already an available tab, register it so it shows in "+"
+        if (!this.availableTabs.has(id)) {
+          this.availableTabs.set(id, {
+            id,
+            label,
+            icon: opts?.icon,
+            factory: () => ({ el: contentEl }),
+          });
         }
-      });
-      btn.appendChild(closeBtn);
-    }
+        this.refreshAddMenu();
+      }
+    });
+    btn.appendChild(closeBtn);
 
     btn.addEventListener('click', (e) => {
       e.stopPropagation();

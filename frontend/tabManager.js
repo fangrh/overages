@@ -45,23 +45,27 @@
       const labelSpan = document.createElement("span");
       labelSpan.textContent = label;
       btn.appendChild(labelSpan);
-      const tab = this.availableTabs.get(id);
-      const canClose = opts?.onClose || tab;
-      if (canClose) {
-        const closeBtn = document.createElement("span");
-        closeBtn.className = "panel-tab-close";
-        closeBtn.textContent = "\xD7";
-        closeBtn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          if (opts?.onClose) {
-            opts.onClose();
-          } else {
-            this.removeTab(id);
-            this.refreshAddMenu();
+      const closeBtn = document.createElement("span");
+      closeBtn.className = "panel-tab-close";
+      closeBtn.textContent = "\xD7";
+      closeBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (opts?.onClose) {
+          opts.onClose();
+        } else {
+          this.removeTab(id);
+          if (!this.availableTabs.has(id)) {
+            this.availableTabs.set(id, {
+              id,
+              label,
+              icon: opts?.icon,
+              factory: () => ({ el: contentEl })
+            });
           }
-        });
-        btn.appendChild(closeBtn);
-      }
+          this.refreshAddMenu();
+        }
+      });
+      btn.appendChild(closeBtn);
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
         this.switchTo(id);
@@ -261,4 +265,3 @@
   };
   window.TabManager = TabManager;
 })();
-//# sourceMappingURL=tabManager.js.map

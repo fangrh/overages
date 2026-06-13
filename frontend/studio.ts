@@ -937,7 +937,11 @@ function initXterm(): void {
   // Dynamically import xterm from the CDN-loaded global (or bundled)
   // xterm is loaded via CDN in index.html
   const xtermLib = (window as any).xtermLib;
-  if (!xtermLib || typeof xtermLib.Terminal !== 'function') return;
+  if (!xtermLib || typeof xtermLib.Terminal !== 'function') {
+    // CDN failed to load — show a helpful message instead of blank panel
+    container.innerHTML = '<div style="padding:12px;color:#f38ba8;font:13px/1.5 \'Cascadia Code\',monospace;">⚠ Terminal unavailable — xterm.js failed to load from CDN.<br><span style="color:#6c7086;">Check your internet connection and reload the page.</span></div>';
+    return;
+  }
 
   xterm = new xtermLib.Terminal({
     cursorBlink: true,
@@ -969,8 +973,11 @@ function connectTerminalWs(): void {
   const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   xtermWs = new WebSocket(`${wsProtocol}//${location.host}/api/terminal`);
 
+  xterm?.write('\x1b[90mConnecting...\x1b[0m\r');
+
   xtermWs.onopen = () => {
-    // Send initial size
+    // Clear the "Connecting..." message and send initial size
+    xterm?.write('\r\x1b[K');
     if (xtermFitAddon && xterm) {
       const dims = xtermFitAddon.proposeDimensions();
       if (dims) {
@@ -984,7 +991,7 @@ function connectTerminalWs(): void {
   };
 
   xtermWs.onclose = () => {
-    xterm?.write('\r\n\x1b[90m— connection lost —\x1b[0m\r\n');
+    xterm?.write('\r\n\x1b[90m— connection lost, reopen tab to reconnect —\x1b[0m\r\n');
   };
 
   xtermWs.onerror = () => {

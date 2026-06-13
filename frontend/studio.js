@@ -717,7 +717,10 @@
     const container = document.getElementById("terminal-xterm");
     if (!container) return;
     const xtermLib = window.xtermLib;
-    if (!xtermLib || typeof xtermLib.Terminal !== "function") return;
+    if (!xtermLib || typeof xtermLib.Terminal !== "function") {
+      container.innerHTML = `<div style="padding:12px;color:#f38ba8;font:13px/1.5 'Cascadia Code',monospace;">\u26A0 Terminal unavailable \u2014 xterm.js failed to load from CDN.<br><span style="color:#6c7086;">Check your internet connection and reload the page.</span></div>`;
+      return;
+    }
     xterm = new xtermLib.Terminal({
       cursorBlink: true,
       fontSize: 13,
@@ -744,7 +747,9 @@
     if (!xterm) return;
     const wsProtocol = location.protocol === "https:" ? "wss:" : "ws:";
     xtermWs = new WebSocket(`${wsProtocol}//${location.host}/api/terminal`);
+    xterm?.write("\x1B[90mConnecting...\x1B[0m\r");
     xtermWs.onopen = () => {
+      xterm?.write("\r\x1B[K");
       if (xtermFitAddon && xterm) {
         const dims = xtermFitAddon.proposeDimensions();
         if (dims) {
@@ -756,7 +761,7 @@
       xterm?.write(ev.data);
     };
     xtermWs.onclose = () => {
-      xterm?.write("\r\n\x1B[90m\u2014 connection lost \u2014\x1B[0m\r\n");
+      xterm?.write("\r\n\x1B[90m\u2014 connection lost, reopen tab to reconnect \u2014\x1B[0m\r\n");
     };
     xtermWs.onerror = () => {
       xterm?.write("\r\n\x1B[31mTerminal connection error\x1B[0m\r\n");
@@ -989,4 +994,3 @@
   }
   init();
 })();
-//# sourceMappingURL=studio.js.map
