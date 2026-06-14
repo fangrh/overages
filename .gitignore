@@ -4,3 +4,14 @@ node_modules/
 .gstack/
 .omx/
 __pycache__/
+
+# Local IDE runtime state (workspace path, open file) — machine-specific.
+.supergds-state.json
+
+# Stray GDS output written to the repo root by runs using cwd; real fixtures
+# live under tests/py/gds/.
+/gds/
+
+# External deps cloned for editable install in the gds env. Tracked by their own
+# repos, not here. (gdsfactory fork → https://github.com/fangrh/gdsfactory)
+vendor/
