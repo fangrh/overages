@@ -1,4 +1,4 @@
-# superGDS Studio
+# overGDS Studio
 
 A visual editor for GDS layout generation with Python scripting.
 

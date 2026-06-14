@@ -22,14 +22,23 @@ so the result is attributed to the user's `gf.boolean(...)` call site.
 
 ### Apply / re-apply
 
-The fork lives in the `gds` conda env's site-packages. From that package's
-root:
+> **Primary workflow:** the fork is cloned to `vendor/gdsfactory/` and installed
+> **editable** in the `gds` env (`pip install -e .`). This fix is already in that
+> working source — committed to the fork as `2c9a63007` and pushed to
+> `github.com/fangrh/gdsfactory` (`feat/provenance-tracking`). To pick it up:
+> `git -C vendor/gdsfactory pull`. To change fork behavior generally, edit
+> `vendor/gdsfactory/...` directly (live, via editable install) and commit in the
+> clone.
+
+The manual `patch -p1` below is only needed for a **non-editable** reinstall
+(e.g. `pip install git+…` into a fresh env), which copies a clean `boolean.py`
+into site-packages:
 
 ```bash
 GDS_SITE=$(/home/photo/miniconda3/envs/gds/bin/python -c "import gdsfactory, os; print(os.path.dirname(gdsfactory.__file__))")
-cd "$(dirname "$GDS_SITE")"   # …/site-packages
+cd "$(dirname "$GDS_SITE")"   # …/site-packages  (or vendor/gdsfactory if editable)
 patch -p1 < /mnt/e/overages/patches/gdsfactory-boolean-provenance.patch
 ```
 
-(Re-run after any `pip install` / reinstall of the fork, which overwrites
+(Re-run after any non-editable `pip install` of the fork, which overwrites
 `boolean.py`.)
