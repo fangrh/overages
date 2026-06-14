@@ -194,6 +194,20 @@ def parse_gds(gds_path):
                 attach_provenance(feature, shape, provenance_map)
                 features.append(feature)
 
+            # Process boxes (GDS BOX records). klayout exposes axis-aligned
+            # rectangles as Box shapes rather than polygons, so without this a
+            # plain gf.components.rectangle — the most basic primitive — renders
+            # blank in the viewer. Convert each Box to a 4-point SimplePolygon
+            # and route it through the same polygon path.
+            for shape in shapes.each(kdb.Shapes.SBoxes):
+                feature = polygon_to_feature(
+                    kdb.SimplePolygon(shape.box), layer_num, datatype, cell_name,
+                )
+                if feature is None:
+                    continue
+                attach_provenance(feature, shape, provenance_map)
+                features.append(feature)
+
     return {
         "type": "FeatureCollection",
         "features": features,
