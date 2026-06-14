@@ -44,10 +44,15 @@ export async function registerEnvRoutes(app) {
                 isActive: true,
             });
         }
-        // Mark the currently active one
-        const currentPython = findCurrentPython();
+        // Choose a sensible default-active env. This only pre-selects the dropdown
+        // when no saved cookie restores the user's prior choice — but it matters:
+        // defaulting to bare "python" silently produces GDS builds WITHOUT provenance,
+        // because the provenance-enabled gdsfactory fork only lives in conda envs
+        // (e.g. 'gds'). Prefer 'gds', then any real conda env, before System Python.
+        const preferred = envs.find(e => e.name === 'gds') ||
+            envs.find(e => !!e.path && e.path !== 'python' && e.name !== 'System Python');
         for (const env of envs) {
-            env.isActive = env.path === currentPython || env.name === 'base' || env.name === 'Python 3.12';
+            env.isActive = preferred ? env === preferred : env.name === 'System Python';
         }
         return reply.send({ environments: envs });
     });
@@ -57,21 +62,6 @@ export async function registerEnvRoutes(app) {
         process.env.SELECTED_PYTHON_PATH = pythonPath;
         return reply.send({ success: true, path: pythonPath });
     });
-}
-function findCurrentPython() {
-    // Check for selected python first
-    const selected = process.env.SELECTED_PYTHON_PATH;
-    if (selected)
-        return selected;
-    // Try to find from conda
-    try {
-        const result = runCommandSync('conda', ['info', '--base']);
-        const baseEnv = result.trim();
-        return path.join(baseEnv, 'bin', 'python');
-    }
-    catch {
-        return 'python';
-    }
 }
 async function resolvePythonPath(unixPath, winPath, envPath) {
     const fs = await import('fs/promises');
@@ -134,8 +124,4 @@ function runCommand(cmd, args) {
         });
         proc.on('error', (err) => reject(err));
     });
-}
-function runCommandSync(cmd, args) {
-    const { execSync } = require('child_process');
-    return execSync(`${cmd} ${args.join(' ')}`, { encoding: 'utf8' });
 }

@@ -5,8 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GDS Viewer</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@10/ol.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@6/css/xterm.css">
 <script src="https://cdn.jsdelivr.net/npm/ol@10/dist/ol.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@6/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.11/lib/addon-fit.js"></script>
 <script src="/tabManager.js"></script>
+<script src="/termPanel.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { height: 100%; }
@@ -16,10 +20,20 @@ body { display: flex; background: #1a1a2e; font-family: -apple-system, BlinkMacS
 #sidebar button { width: 100%; margin-bottom: 8px; padding: 6px 10px; background: #45475a; color: #cdd6f4; border: 1px solid #585b70; border-radius: 4px; cursor: pointer; font-size: 12px; }
 #sidebar button:hover { background: #585b70; }
 #map-container { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-#console { height: 200px; background: #11111b; color: #cdd6f4; font: 13px/1.5 'Cascadia Code', 'Fira Code', 'Consolas', monospace; overflow-y: auto; border-top: 2px solid #313244; flex-shrink: 0; transition: height 0.15s; }
+#console { height: 200px; display: flex; flex-direction: column; background: #11111b; color: #cdd6f4; font: 13px/1.5 'Cascadia Code', 'Fira Code', 'Consolas', monospace; overflow-y: auto; border-top: 2px solid #313244; flex-shrink: 0; transition: height 0.15s; }
 #console.collapsed { height: 32px; overflow-y: hidden; }
+/* Drag-to-resize handle — lives in #map-container between the map and the console
+   (not inside #console) so it never scrolls out of view and never fights the
+   console's height transition. Drag up to grow the console, down to shrink it. */
+#console-resizer { height: 5px; flex-shrink: 0; cursor: ns-resize; background: #313244; transition: background 0.15s; }
+#console-resizer:hover, #console-resizer.dragging { background: #89b4fa; }
 #console-header { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; background: #181825; border-bottom: 1px solid #313244; cursor: pointer; user-select: none; position: sticky; top: 0; z-index: 1; }
 #console-header span { font-size: 12px; font-weight: 600; color: #89b4fa; }
+/* Copy-to-clipboard button in the console header — copies the active panel's
+   text (Info provenance / Source code) so it can be pasted into an LLM. */
+#console-copy-btn { font: 600 11px/1 'Cascadia Code','Fira Code','Consolas',monospace; color: #6c7086; background: transparent; border: 1px solid #313244; border-radius: 4px; padding: 3px 8px; cursor: pointer; user-select: none; transition: background 0.15s, color 0.15s, border-color 0.15s; }
+#console-copy-btn:hover { color: #cdd6f4; background: #313244; border-color: #585b70; }
+#console-copy-btn.copied { color: #a6e3a1; border-color: #a6e3a1; background: rgba(166,227,161,0.08); }
 #console-body .kv { display: flex; gap: 8px; padding: 1px 0; }
 #console-body .kv .key { color: #6c7086; min-width: 90px; flex-shrink: 0; text-align: right; }
 #console-body .kv .val { color: #cdd6f4; word-break: break-all; }
@@ -75,14 +89,8 @@ body { display: flex; background: #1a1a2e; font-family: -apple-system, BlinkMacS
 .zoom-btn { width: 32px; height: 32px; background: #1e1e2e; border: 1px solid #313244; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #6c7086; padding: 0; }
 .zoom-btn:hover { background: #313244; color: #cdd6f4; }
 .zoom-btn svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.zoom-btn.running { opacity: 0.6; pointer-events: none; }
-.zoom-btn.running .run-icon { display: none; }
-.zoom-btn.running .spinner-icon { display: inline-block; }
-.zoom-btn .spinner-icon { display: none; width: 14px; height: 14px; border: 2px solid #6c7086; border-top-color: transparent; border-radius: 50%; animation: spin 0.6s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-#rebuild-overlay { display: none; position: absolute; inset: 0; background: rgba(26,26,46,0.7); z-index: 200; align-items: center; justify-content: center; color: #89b4fa; font-size: 14px; }
-#rebuild-overlay.visible { display: flex; }
-#rebuild-overlay .spinner { width: 28px; height: 28px; border: 3px solid #313244; border-top-color: #89b4fa; border-radius: 50%; animation: spin 0.6s linear infinite; margin-right: 10px; }
+/* Terminal host inside the console (Terminal tab) — TermPanel fills it */
+#viewer-term-panel { background: #11111b; }
 </style>
 </head>
 <body>
@@ -93,10 +101,6 @@ body { display: flex; background: #1a1a2e; font-family: -apple-system, BlinkMacS
     <div id="map-row">
         <div id="map" style="flex:1; position: relative;">
             <div id="zoom-controls">
-                <button class="zoom-btn" id="run-btn" title="Rebuild script" onclick="rebuildScript()">
-                    <svg class="run-icon" viewBox="0 0 24 24"><polygon points="6,3 20,12 6,21" fill="currentColor" stroke="none"/></svg>
-                    <span class="spinner-icon"></span>
-                </button>
                 <button class="zoom-btn" title="Zoom in" onclick="zoomIn()">
                     <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                 </button>
@@ -106,10 +110,6 @@ body { display: flex; background: #1a1a2e; font-family: -apple-system, BlinkMacS
                 <button class="zoom-btn" title="Fit view" onclick="fitView()">
                     <svg viewBox="0 0 24 24"><path d="M4 4h4M4 4v4M20 4h-4M20 4v4M4 20h4M4 20v-4M20 20h-4M20 20v-4"/></svg>
                 </button>
-            </div>
-            <div id="rebuild-overlay">
-                <div class="spinner"></div>
-                Rebuilding...
             </div>
         </div>
         <div id="draw-toolbar">
@@ -137,16 +137,20 @@ body { display: flex; background: #1a1a2e; font-family: -apple-system, BlinkMacS
             </button>
         </div>
     </div>
+    <div id="console-resizer" title="Drag to resize"></div>
     <div id="console">
         <div id="console-header">
             <span class="tab-bar" style="display:flex;align-items:center;gap:2px;"></span>
             <span style="display:flex;align-items:center;gap:6px;">
+                <button id="console-copy-btn" type="button" title="Copy the active panel (Info / Source) to clipboard" onclick="copyActivePanel(event)">Copy</button>
                 <span onclick="toggleConsole()" title="Collapse" style="cursor:pointer;color:#6c7086;font-size:14px;">&#9660;</span>
             </span>
         </div>
         <div id="console-body">
-            <div id="source-panel"><p class="placeholder">Click a polygon to inspect source</p></div>
+            <div id="viewer-term-panel" style="flex:1;min-height:0;"></div>
             <div id="info-panel"><p class="placeholder">Click a polygon to inspect</p></div>
+            <div id="viewer-log-panel" style="flex:1;overflow-y:auto;padding:8px 12px;font:12px/1.5 'Cascadia Code','Fira Code','Consolas',monospace;color:#cdd6f4;"><p class="placeholder">Actions will appear here</p></div>
+            <div id="source-panel"><p class="placeholder">Click a polygon to inspect source</p></div>
         </div>
     </div>
 </div>
@@ -156,6 +160,14 @@ body { display: flex; background: #1a1a2e; font-family: -apple-system, BlinkMacS
 // VS Code Webview API
 // ============================================================
 let vscode = null; try { vscode = acquireVsCodeApi(); } catch(e) { /* standalone */ }
+
+// These two refs MUST be declared before setupViewerTabs() runs below.
+// Declaring them later (as they previously were) with `var … = null` would
+// hoist-reassign them back to null AFTER setupViewerTabs()/ensureViewerTerminal()
+// set them — which broke the terminal: viewerTerm ended up null, so every
+// Terminal-tab activation spawned a fresh PTY and the fit() resize was skipped.
+var viewerTabManager = null;
+var viewerTerm = null;
 
 // Initialize TabManager for viewer console
 setupViewerTabs();
@@ -173,8 +185,7 @@ var selectedFeatures = new ol.Collection();
 var ctrlPressed = false;
 // Progressive selection cycle: 0=none, 1=array, 2=loop_index
 var selectionCycle = 0;
-var activeTab = 'source';
-var viewerTabManager = null;
+var activeTab = 'terminal';
 var allFeatures = [];
 var layerColors = {};
 
@@ -1570,30 +1581,37 @@ function setupViewerTabs() {
     if (!window.TabManager) { console.warn('TabManager not loaded, tabs will not work'); return; }
     viewerTabManager = new window.TabManager('console-header', 'console-body');
 
+    var termPanel  = document.getElementById('viewer-term-panel');
+    var infoPanel  = document.getElementById('info-panel');
+    var logPanel   = document.getElementById('viewer-log-panel');
     var sourcePanel = document.getElementById('source-panel');
-    var infoPanel = document.getElementById('info-panel');
 
-    viewerTabManager.addTab('source', 'Source', sourcePanel, {
+    // Terminal tab — interactive shell (multi-terminal via TermPanel).
+    // Lazily created on first activation; refit on every activation.
+    viewerTabManager.addTab('terminal', 'Terminal', termPanel, {
         active: true,
-        onActivate: function() { activeTab = 'source'; }
+        onActivate: function () {
+            activeTab = 'terminal';
+            ensureViewerTerminal();
+            setTimeout(function () { if (viewerTerm) viewerTerm.fitActive(); }, 50);
+        }
     });
 
     viewerTabManager.addTab('info', 'Info', infoPanel, {
-        onActivate: function() { activeTab = 'info'; }
+        onActivate: function () { activeTab = 'info'; }
+    });
+
+    // Log tab — action/event log (persistent panel; writers use __viewerLogPanel)
+    window.__viewerLogPanel = logPanel;
+    viewerTabManager.addTab('log', 'Log', logPanel, {
+        onActivate: function () { activeTab = 'log'; }
+    });
+
+    viewerTabManager.addTab('source', 'Source', sourcePanel, {
+        onActivate: function () { activeTab = 'source'; }
     });
 
     // === Available tabs (shown in "+" dropdown) ===
-
-    // Log tab — action/event log
-    viewerTabManager.addAvailableTab('log', 'Log', function() {
-        var panel = document.createElement('div');
-        panel.className = 'terminal-tab-panel';
-        panel.style.cssText = 'padding:8px 12px;font:12px/1.5 \'Cascadia Code\',\'Fira Code\',monospace;color:#cdd6f4;overflow-y:auto;';
-        panel.innerHTML = '<p class="placeholder" style="color:#585b70;font-style:italic;padding:20px 0;text-align:center;">Actions will appear here</p>';
-        // Store reference for event logging
-        window.__viewerLogPanel = panel;
-        return { el: panel };
-    }, '📝');
 
     // Help tab — keyboard shortcuts and controls reference
     viewerTabManager.addAvailableTab('help', 'Help', function() {
@@ -1799,10 +1817,85 @@ function shapeToYAML(sg) {
 function toggleConsole() {
     var c = document.getElementById('console');
     var icon = document.querySelector('#console-header span[title="Collapse"]');
-    c.classList.toggle('collapsed');
-    if (icon) {
-        icon.innerHTML = c.classList.contains('collapsed') ? '&#9654;' : '&#9660;';
+    var willCollapse = !c.classList.contains('collapsed');
+    if (willCollapse) {
+        // Remember the current (possibly user-dragged) height so a later expand
+        // restores it instead of snapping back to the 200px CSS default. Clearing
+        // the inline height lets #console.collapsed { height: 32px } take effect —
+        // an inline height would otherwise outrank the .collapsed rule.
+        c.dataset.height = c.style.height || (c.offsetHeight + 'px');
+        c.style.height = '';
+        c.classList.add('collapsed');
+    } else {
+        c.classList.remove('collapsed');
+        c.style.height = c.dataset.height || '';
+        delete c.dataset.height;
     }
+    if (icon) {
+        icon.innerHTML = willCollapse ? '&#9654;' : '&#9660;';
+    }
+}
+
+// Copy the active console panel's text to the clipboard. The Info and Source
+// panels (provenance + generated code) are what gets pasted into an LLM, so
+// the button copies whichever text panel TabManager currently has on top.
+// Inactive panels are display:none, so the first visible candidate wins.
+async function copyActivePanel(ev) {
+    if (ev) { ev.stopPropagation(); }
+    var candidates = ['info-panel', 'source-panel', 'viewer-log-panel'];
+    var active = null;
+    for (var i = 0; i < candidates.length; i++) {
+        var el = document.getElementById(candidates[i]);
+        if (el && getComputedStyle(el).display !== 'none') { active = el; break; }
+    }
+    if (!active) return;
+    var text = (active.innerText || '').trim();
+    if (!text) return;
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+        } else {
+            throw new Error('Clipboard API unavailable');
+        }
+    } catch (e) {
+        // Fallback for non-secure contexts / older browsers.
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus(); ta.select();
+        try { document.execCommand('copy'); } catch (_) {}
+        document.body.removeChild(ta);
+    }
+    var btn = document.getElementById('console-copy-btn');
+    if (btn) {
+        btn.classList.add('copied');
+        btn.textContent = 'Copied ✓';
+        setTimeout(function () {
+            btn.classList.remove('copied');
+            btn.textContent = 'Copy';
+        }, 1200);
+    }
+}
+
+// ============================================================
+// Multi-terminal panel (shares TermPanel with the main IDE).
+// Lazily created the first time the Terminal tab is opened, so no PTY is
+// spawned until the user asks.
+// ============================================================
+function ensureViewerTerminal() {
+    if (viewerTerm) return;
+    // @xterm/addon-fit's UMD exposes window.FitAddon as { FitAddon: [class] },
+    // so the constructor is window.FitAddon.FitAddon, not window.FitAddon.
+    const FitAddonClass = (window.FitAddon && window.FitAddon.FitAddon) || window.FitAddon;
+    if (!window.TermPanel || !window.Terminal || !FitAddonClass) return;
+    try {
+        viewerTerm = new window.TermPanel(
+            document.getElementById('viewer-term-panel'),
+            { Terminal: window.Terminal, FitAddon: FitAddonClass }
+        );
+    } catch (e) { console.error('viewer terminal init failed', e); }
 }
 
 // ============================================================
@@ -1905,22 +1998,6 @@ function sendAskClaude() {
 }
 
 // ============================================================
-// Action bar: Run / Claude Code / Codex
-// ============================================================
-function rebuildScript() {
-    var btn = document.getElementById('run-btn');
-    btn.classList.add('running');
-    document.getElementById('rebuild-overlay').classList.add('visible');
-    vscode && vscode.postMessage({ type: 'rebuild' });
-}
-
-function onRebuildComplete() {
-    var btn = document.getElementById('run-btn');
-    btn.classList.remove('running');
-    document.getElementById('rebuild-overlay').classList.remove('visible');
-}
-
-// ============================================================
 // Handle messages from extension
 // ============================================================
 window.addEventListener('message', function(event) {
@@ -1932,7 +2009,6 @@ window.addEventListener('message', function(event) {
             else if (window.parent !== window) window.parent.postMessage({ type: 'webviewReady' }, '*');
             break;
         case 'loadGds':
-            onRebuildComplete();
             loadGdsData(
                 message.geojson,
                 message.gdsPath,
@@ -1954,9 +2030,6 @@ window.addEventListener('message', function(event) {
                 }
             });
             onSelectionChanged();
-            break;
-        case 'rebuildError':
-            onRebuildComplete();
             break;
         case 'selectBySource':
             _selectFeaturesBySource((message.file || '').replace(/\\/g, '/'), message.line);
@@ -1987,6 +2060,358 @@ new ResizeObserver(function() {
 // Signal ready to extension
 // ============================================================
 vscode && vscode.postMessage({ type: 'webviewReady' });
+</script>
+<script>
+// ============================================================
+// Standalone (popped-out) viewer — full-width two-row header
+// (action toolbar ABOVE the GDS-result tab strip) + multi-GDS
+// tabs. Only shown when opened as its own window (window.opener
+// set by window.open, or ?popout=1), NOT when embedded as the
+// studio's iframe (opener is null there).
+// ============================================================
+(function () {
+    var isStandalone = !!window.opener ||
+        new URLSearchParams(location.search).get('popout') === '1';
+    if (!isStandalone) return;
+
+    function basename(p) { return (p || '').replace(/\\/g, '/').split('/').pop() || (p || ''); }
+
+    var css = '' +
+        'body { padding-top: 68px; }' +  // make room for the fixed header + tab strip
+        '#sa-header { position: fixed; top: 0; left: 0; right: 0; height: 34px; z-index: 300; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: #181825; border-bottom: 1px solid #313244; }' +
+        '#sa-gdstabs { position: fixed; top: 34px; left: 0; right: 0; height: 34px; z-index: 299; display: flex; align-items: stretch; overflow-x: auto; background: #181825; border-bottom: 1px solid #313244; }' +
+        '.sa-title { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #6c7086; white-space: nowrap; padding-right: 4px; }' +
+        '.sa-btn { padding: 5px 11px; background: #45475a; color: #cdd6f4; border: 1px solid #585b70; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500; transition: background 0.15s, border-color 0.15s; }' +
+        '.sa-btn:hover { background: #585b70; border-color: #6c7086; }' +
+        '.sa-btn:active { transform: translateY(1px); }' +
+        '.sa-btn:disabled { opacity: 0.4; cursor: not-allowed; }' +
+        '.sa-compile:not(:disabled) { background: rgba(166,227,161,0.15); border-color: rgba(166,227,161,0.4); color: #a6e3a1; }' +
+        '.sa-compile:not(:disabled):hover { background: rgba(166,227,161,0.25); border-color: rgba(166,227,161,0.6); }' +
+        '.sa-dockback:not(:disabled) { background: rgba(137,180,250,0.12); border-color: rgba(137,180,250,0.35); color: #89b4fa; }' +
+        '.sa-dockback:not(:disabled):hover { background: rgba(137,180,250,0.22); border-color: rgba(137,180,250,0.55); }' +
+        '.sa-env { padding: 4px 22px 4px 8px; background: #313244 url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2710%27 height=%276%27 viewBox=%270 0 10 6%27%3E%3Cpath d=%27M1 1l4 4 4-4%27 stroke=%27%236c7086%27 stroke-width=%271.5%27 fill=%27none%27 stroke-linecap=%27round%27/%3E%3C/svg%3E") no-repeat right 7px center; color: #cdd6f4; border: 1px solid #585b70; border-radius: 4px; font-size: 12px; cursor: pointer; max-width: 150px; -webkit-appearance: none; appearance: none; }' +
+        '.sa-env:hover { background-color: #45475a; border-color: #6c7086; }' +
+        '.sa-gtab { display: flex; align-items: center; gap: 6px; padding: 7px 12px; font-size: 13px; color: #6c7086; background: transparent; border-right: 1px solid #313244; border-bottom: 2px solid transparent; cursor: pointer; user-select: none; flex-shrink: 0; max-width: 260px; }' +
+        '.sa-gtab:hover { background: #313244; color: #cdd6f4; }' +
+        '.sa-gtab.active { color: #cdd6f4; background: #1e1e32; border-bottom: 2px solid #89b4fa; cursor: default; }' +
+        '.sa-gtab .gtab-close { background: none; border: none; color: #6c7086; cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; border-radius: 3px; }' +
+        '.sa-gtab .gtab-close:hover { background: #f38ba8; color: #cdd6f4; }' +
+        '.sa-gtab-empty { display: flex; align-items: center; padding: 0 14px; font-size: 12px; font-style: italic; color: #585b70; white-space: nowrap; }';
+    var style = document.createElement('style');
+    style.textContent = css;
+    document.head.appendChild(style);
+
+    // Header: title + actions (one level above the tab strip).
+    var header = document.createElement('div');
+    header.id = 'sa-header';
+    header.innerHTML =
+        '<span class="sa-title">GDS Viewer</span>' +
+        '<div style="flex:1"></div>' +
+        '<button class="sa-btn sa-compile" id="sa-compile" title="Compile — runs the script open in overGDS Studio and reloads this viewer">▶ Compile</button>' +
+        '<select class="sa-env" id="sa-env" title="Python Environment"><option value="">Detecting…</option></select>' +
+        '<button class="sa-btn sa-dockback" id="sa-dockback" title="Dock back into overGDS Studio">⤢ Dock Back</button>';
+    document.body.appendChild(header);
+
+    // GDS-result tab strip (sits one level below the action header).
+    var tabbar = document.createElement('div');
+    tabbar.id = 'sa-gdstabs';
+    document.body.appendChild(tabbar);
+
+    var tabs = [];      // [{ id, label, data }]
+    var activeId = null;
+
+    function renderTabs() {
+        tabbar.innerHTML = '';
+        if (tabs.length === 0) {
+            var hint = document.createElement('div');
+            hint.className = 'sa-gtab-empty';
+            hint.textContent = 'No GDS built yet — press Compile';
+            tabbar.appendChild(hint);
+            return;
+        }
+        tabs.forEach(function (tab) {
+            var el = document.createElement('div');
+            el.className = 'sa-gtab' + (tab.id === activeId ? ' active' : '');
+            el.title = (tab.data && tab.data.gdsPath) || tab.label;
+            var label = document.createElement('span');
+            label.textContent = tab.label;
+            el.appendChild(label);
+            var close = document.createElement('button');
+            close.className = 'gtab-close'; close.title = 'Close'; close.textContent = '×';
+            close.addEventListener('click', function (e) { e.stopPropagation(); closeTab(tab.id); });
+            el.addEventListener('click', function () { activateTab(tab.id); });
+            el.appendChild(close);
+            tabbar.appendChild(el);
+        });
+    }
+    function loadTab(tab) {
+        if (!tab || !tab.data) return;
+        try { loadGdsData(tab.data.geojson, tab.data.gdsPath, tab.data.pythonFile, tab.data.annotations, tab.data.mode); }
+        catch (err) { console.error('standalone load failed', err); }
+        // Baseline the file's mtime so the auto-refresh poller (defined below)
+        // fires only when the GDS is regenerated AFTER this load, not for the
+        // load itself. seedWatchedMtime is hoisted within this IIFE.
+        if (tab.data.gdsPath) seedWatchedMtime(tab.data.gdsPath);
+    }
+    function activateTab(id) {
+        var tab = null;
+        for (var i = 0; i < tabs.length; i++) if (tabs[i].id === id) tab = tabs[i];
+        if (!tab) return;
+        activeId = id;
+        loadTab(tab);
+        renderTabs();
+    }
+    function closeTab(id) {
+        var idx = -1;
+        for (var i = 0; i < tabs.length; i++) if (tabs[i].id === id) idx = i;
+        if (idx < 0) return;
+        tabs.splice(idx, 1);
+        if (activeId === id) {
+            var next = tabs[idx] || tabs[idx - 1] || null;
+            if (next) activateTab(next.id);
+            else activeId = null;
+        }
+        renderTabs();
+    }
+    function addTab(data) {
+        var raw = data && data.gdsPath ? String(data.gdsPath) : '';
+        var id = raw.replace(/\\/g, '/') || ('gds-' + (tabs.length + 1));
+        var label = basename(raw) || 'GDS';
+        var existing = null;
+        for (var i = 0; i < tabs.length; i++) if (tabs[i].id === id) existing = tabs[i];
+        if (existing) { existing.data = data; existing.label = label; }
+        else tabs.push({ id: id, label: label, data: data });
+        activeId = id;
+        loadTab(existing || tabs[tabs.length - 1]);
+        renderTabs();
+    }
+
+    renderTabs();
+
+    // Populate envs + restore the shared studio-python-env cookie.
+    fetch('/api/python-environments').then(function (r) { return r.ok ? r.json() : { environments: [] }; })
+      .then(function (d) {
+        var sel = document.getElementById('sa-env');
+        var envs = d.environments || [];
+        sel.innerHTML = envs.length ? '' : '<option value="">Python (default)</option>';
+        envs.forEach(function (env) {
+            var o = document.createElement('option');
+            o.value = env.path; o.textContent = env.name; o.title = env.path;
+            if (env.isActive) o.selected = true;
+            sel.appendChild(o);
+        });
+        var raw = (document.cookie.split(';').map(function (s) { return s.trim(); })
+            .filter(function (s) { return s.indexOf('studio-python-env=') === 0; })[0] || '');
+        var saved = raw.split('=').slice(1).join('=');
+        if (saved) sel.value = decodeURIComponent(saved);
+        sel.addEventListener('change', function () {
+            if (sel.value) document.cookie = 'studio-python-env=' + encodeURIComponent(sel.value) +
+                ';max-age=31536000;path=/;SameSite=Lax';
+        });
+      }).catch(function () {
+        document.getElementById('sa-env').innerHTML = '<option value="">Python (default)</option>';
+      });
+
+    // Compile: read the file open in the studio from /api/ide-state, run it,
+    // and add a result tab for the freshly built GDS.
+    document.getElementById('sa-compile').addEventListener('click', function () {
+        fetch('/api/ide-state').then(function (r) { return r.json(); }).then(function (st) {
+            var file = st.openFile;
+            var sel = document.getElementById('sa-env');
+            var btn = document.getElementById('sa-compile');
+            if (!file) { alert('No file is open in overGDS Studio to compile.'); return; }
+            var pythonPath = sel.value;
+            var param = pythonPath ? '&pythonPath=' + encodeURIComponent(pythonPath) : '';
+            btn.disabled = true; btn.textContent = '⏳ Compiling…';
+            var es = new EventSource('/api/run?pythonFile=' + encodeURIComponent(file) + param);
+            es.addEventListener('complete', function (e) {
+                addTab(JSON.parse(e.data));
+                es.close();
+                btn.disabled = false; btn.textContent = '▶ Compile';
+            });
+            es.addEventListener('error', function () {
+                es.close();
+                btn.disabled = false; btn.textContent = '▶ Compile';
+            });
+        });
+    });
+
+    document.getElementById('sa-dockback').addEventListener('click', function () {
+        if (window.opener && !window.opener.closed) {
+            window.opener.postMessage({ type: 'dockBack', pane: 'viewer' }, '*');
+        }
+        window.close();
+    });
+
+    // ---- Auto-refresh: reload the shown GDS when it's regenerated on disk ----
+    // The standalone viewer gets no loadGds messages from a parent, so without
+    // this a rebuild run in the parent IDE, the terminal, or any external
+    // process leaves this window showing stale geometry. Stat-poll the file's
+    // mtime (inotify is unreliable across the NTFS-via-WSL2 workspace mount)
+    // and re-parse when it advances. Mirrors the parent IDE's pollGdsMtime.
+    var watchedMtime = 0;
+    var lastMtimePoll = 0;
+
+    function seedWatchedMtime(gdsPath) {
+        if (!gdsPath) { watchedMtime = 0; return; }
+        fetch('/api/gds-stat?path=' + encodeURIComponent(gdsPath))
+            .then(function (r) { return r.ok ? r.json() : { exists: false, mtimeMs: 0 }; })
+            .then(function (s) { watchedMtime = s.exists ? s.mtimeMs : 0; })
+            .catch(function () { watchedMtime = 0; });
+    }
+
+    function autoRefreshLog(msg) {
+        var p = document.getElementById('viewer-log-panel');
+        if (!p) return;
+        var ph = p.querySelector('.placeholder');
+        if (ph) ph.remove();
+        var line = document.createElement('div');
+        line.textContent = msg;
+        line.style.cssText = 'color:#a6e3a1;padding:2px 0;';
+        p.appendChild(line);
+        p.scrollTop = p.scrollHeight;
+    }
+
+    function reloadShownGds() {
+        var gdsPath = currentGdsPath;
+        if (!gdsPath) return;
+        var sel = document.getElementById('sa-env');
+        var pythonPath = sel ? sel.value : '';
+        fetch('/api/parse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ gdsPath: gdsPath, pythonPath: pythonPath })
+        })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d || !d.geojson) { seedWatchedMtime(gdsPath); return; }
+                // loadGdsData preserves the viewport on reload. pythonFile is
+                // unknown on a pure re-parse, so reuse the current one; pass no
+                // annotations (they're user drawings, not part of the GDS).
+                loadGdsData(d.geojson, gdsPath, currentPythonFile, [], d.mode);
+                // Keep the standalone tab's cached payload in sync so switching
+                // away and back doesn't show the pre-rebuild geometry.
+                var id = gdsPath.replace(/\\/g, '/');
+                for (var i = 0; i < tabs.length; i++) {
+                    if (tabs[i].id === id) {
+                        tabs[i].data = Object.assign({}, d, { gdsPath: gdsPath, pythonFile: currentPythonFile });
+                        break;
+                    }
+                }
+                autoRefreshLog('↻ Auto-refreshed ' + basename(gdsPath) + ' (file changed on disk)');
+                seedWatchedMtime(gdsPath);
+            })
+            .catch(function (e) {
+                console.error('[auto-refresh] reload failed', e);
+                seedWatchedMtime(gdsPath);
+            });
+    }
+
+    function pollAutoRefresh() {
+        var now = Date.now();
+        if (now - lastMtimePoll < 2000) return;   // self-throttle to every 2s
+        lastMtimePoll = now;
+        var gdsPath = currentGdsPath;
+        if (!gdsPath) return;
+        fetch('/api/gds-stat?path=' + encodeURIComponent(gdsPath))
+            .then(function (r) { return r.ok ? r.json() : { exists: false, mtimeMs: 0 }; })
+            .then(function (s) {
+                if (!s.exists) return;
+                if (!watchedMtime) { watchedMtime = s.mtimeMs; return; }   // first baseline
+                if (s.mtimeMs > watchedMtime) {
+                    watchedMtime = s.mtimeMs;   // optimistic; reload re-seeds for real
+                    reloadShownGds();
+                }
+            })
+            .catch(function () {});
+    }
+
+    setInterval(pollAutoRefresh, 1000);
+
+    // Inherit the main IDE's GDS-result state so a freshly popped-out viewer
+    // shows the already-built GDS without recompiling.
+    window.addEventListener('message', function (e) {
+        var msg = e.data || {};
+        if (msg.type === 'popupState' && msg.pane === 'viewer' && msg.viewerState) {
+            var st = msg.viewerState;
+            (st.tabs || []).forEach(function (t) { tabs.push({ id: t.id, label: t.label, data: t.data }); });
+            var sel = document.getElementById('sa-env');
+            if (st.env && sel) sel.value = st.env;
+            if (st.activeId) activateTab(st.activeId);
+            else if (tabs.length) activateTab(tabs[tabs.length - 1].id);
+            renderTabs();
+        }
+    });
+
+    // Ask the opener for inherited state.
+    if (window.opener && !window.opener.closed) {
+        window.opener.postMessage({ type: 'popupReady', pane: 'viewer' }, '*');
+    }
+})();
+
+// Console drag-to-resize: drag the bar above the console to grow/shrink it.
+// Pure DOM, so it works both in the embedded iframe and the popout window.
+// Calls viewerTerm.fitActive() so the xterm terminal stays crisp while resizing.
+(function initConsoleResize() {
+    var resizer = document.getElementById('console-resizer');
+    var consoleEl = document.getElementById('console');
+    if (!resizer || !consoleEl) return;
+
+    var dragging = false;
+    var startY = 0;
+    var startHeight = 0;
+    var fitRaf = 0;
+
+    function fitTerminal() {
+        if (window.viewerTerm && typeof window.viewerTerm.fitActive === 'function') {
+            try { window.viewerTerm.fitActive(); } catch (_) {}
+        }
+    }
+
+    resizer.addEventListener('mousedown', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        dragging = true;
+        // If collapsed, expand first (from the 32px baseline) so an upward drag
+        // grows it smoothly instead of jumping to the 200px default.
+        if (consoleEl.classList.contains('collapsed')) {
+            consoleEl.classList.remove('collapsed');
+            consoleEl.style.height = '32px';
+            var icon = document.querySelector('#console-header span[title="Collapse"]');
+            if (icon) icon.innerHTML = '&#9660;';
+        }
+        startY = e.clientY;
+        startHeight = consoleEl.offsetHeight;
+        consoleEl.style.transition = 'none';   // no lag while following the cursor
+        resizer.classList.add('dragging');
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = 'ns-resize';
+    });
+
+    document.addEventListener('mousemove', function (e) {
+        if (!dragging) return;
+        var dy = e.clientY - startY;               // drag up (dy<0) => taller console
+        var newHeight = startHeight - dy;
+        var minH = 32;
+        var maxH = Math.max(minH + 40, window.innerHeight - 100);  // keep the map visible
+        if (newHeight > maxH) newHeight = maxH;
+        if (newHeight < minH) newHeight = minH;
+        consoleEl.style.height = newHeight + 'px';
+        if (fitRaf) cancelAnimationFrame(fitRaf);
+        fitRaf = requestAnimationFrame(fitTerminal);   // throttle the xterm refit
+    });
+
+    document.addEventListener('mouseup', function () {
+        if (!dragging) return;
+        dragging = false;
+        consoleEl.style.transition = '';          // restore the CSS height transition
+        resizer.classList.remove('dragging');
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+        if (fitRaf) { cancelAnimationFrame(fitRaf); fitRaf = 0; }
+        fitTerminal();
+    });
+})();
 </script>
 </body>
 </html>

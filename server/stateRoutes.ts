@@ -22,9 +22,10 @@ interface BuildStatus {
 }
 
 interface PendingCommand {
-  type: 'highlightSource' | 'selectBySource';
-  file: string;
-  line: number;
+  type: 'highlightSource' | 'selectBySource' | 'reloadGds';
+  file?: string;
+  line?: number;
+  gdsPath?: string;
   id: number;
 }
 
@@ -78,6 +79,7 @@ export async function registerStateRoutes(app: FastifyInstance) {
       status?: BuildStatus;
       question?: string;
       line?: number;
+      gdsPath?: string;
     };
 
     switch (body.type) {
@@ -112,6 +114,19 @@ export async function registerStateRoutes(app: FastifyInstance) {
             type: body.type,
             file: body.file,
             line: body.line,
+            id: ++commandId,
+          });
+        }
+        break;
+      // MCP run_script posts this after a successful build so the viewer
+      // reloads the freshly-generated GDS — the LLM build channel. (Terminal
+      // builds are caught by the frontend's mtime poller instead, since the
+      // server can't observe PTY command output.)
+      case 'reloadGds':
+        if (body.gdsPath) {
+          ideState.pendingCommands.push({
+            type: 'reloadGds',
+            gdsPath: body.gdsPath,
             id: ++commandId,
           });
         }

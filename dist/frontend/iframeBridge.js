@@ -34,6 +34,15 @@ export class IframeBridge {
             case 'selectComponents': {
                 const components = msg.components || [];
                 this.currentComponents = components;
+                // Push selection to server state for MCP server to read
+                fetch('/api/ide-state', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: 'selection', components }),
+                }).catch(() => { });
+                this.forwardToEditor(components);
+                // Dispatch global event so bottom panel Source tab can update
+                window.dispatchEvent(new CustomEvent('gds-selection', { detail: components }));
                 break;
             }
             case 'askClaude':
@@ -102,7 +111,12 @@ export class IframeBridge {
         editor.deltaDecorations([], decorations);
     }
     handleAskClaude(components, question) {
-        console.log('askClaude', components, question);
+        // Post question + components to server state for Claude Code to pick up via MCP
+        fetch('/api/ide-state', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'askClaude', components, question }),
+        }).catch(() => { });
     }
     async handleRequestSource(file, line) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

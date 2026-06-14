@@ -9161,9 +9161,7 @@ ${h2.join(`
   function clearStudioCookie(name) {
     document.cookie = `${STUDIO_COOKIE_PREFIX}${name}=; max-age=0; path=/; SameSite=Lax`;
   }
-  var xterm = null;
-  var xtermFitAddon = null;
-  var xtermWs = null;
+  var termPanel = null;
   var activeTerminalTab = "terminal";
   var tabManager = null;
   function updateSourcePanel(panel, components) {
@@ -9310,28 +9308,14 @@ ${h2.join(`
         const maxHeight = containerHeight - 120;
         const clamped = Math.max(minHeight, Math.min(maxHeight, newHeight));
         this.terminal.style.height = `${clamped}px`;
-        if (xtermFitAddon && xterm) {
-          try {
-            xtermFitAddon.fit();
-          } catch {
-          }
-        }
+        termPanel?.fitActive();
       });
       const endDrag = (e) => {
         if (!this.dragging) return;
         this.dragging = false;
         this.handle.classList.remove("dragging");
         this.handle.releasePointerCapture(e.pointerId);
-        if (xtermFitAddon && xterm) {
-          try {
-            xtermFitAddon.fit();
-            const dims = xtermFitAddon.proposeDimensions();
-            if (dims && xtermWs?.readyState === WebSocket.OPEN) {
-              xtermWs.send(JSON.stringify({ type: "resize", cols: dims.cols, rows: dims.rows }));
-            }
-          } catch {
-          }
-        }
+        termPanel?.fitActive();
         const iframe = document.getElementById("gds-viewer");
         iframe?.contentWindow?.postMessage({ type: "resize" }, "*");
       };
@@ -9342,41 +9326,31 @@ ${h2.join(`
       return this.dragging;
     }
   };
-  var runBtn = document.getElementById("run-btn");
-  var rebuildBtn = document.getElementById("rebuild-btn");
   var monacoContainer = document.getElementById("monaco-editor");
   var iframeViewer = document.getElementById("gds-viewer");
   var terminalBody = document.getElementById("terminal-output");
   var fileTree = document.getElementById("file-tree");
   var sidebar = document.getElementById("sidebar");
-  var currentFileLabel = document.getElementById("current-file");
   var menuFile = document.getElementById("menu-file");
   var menuOpenFolder = document.getElementById("menu-open-folder");
-  var pythonEnvSelect = document.getElementById("python-env-select");
-  var editorTab = document.getElementById("editor-tab");
-  var viewerTab = document.getElementById("viewer-tab");
-  var viewerTabClose = document.getElementById("viewer-tab-close");
+  var editorCompileBtn = document.getElementById("editor-compile-btn");
+  var viewerCompileBtn = document.getElementById("viewer-compile-btn");
+  var editorEnvSelect = document.getElementById("editor-env-select");
+  var viewerEnvSelect = document.getElementById("viewer-env-select");
+  var editorPopoutBtn = document.getElementById("editor-popout-btn");
+  var viewerPopoutBtn = document.getElementById("viewer-popout-btn");
+  var editorTabsBar = document.getElementById("editor-group-tabs");
+  var viewerTabsBar = document.getElementById("viewer-group-tabs");
+  var envSelects = [editorEnvSelect, viewerEnvSelect];
   var layoutMode = "split";
   var panelsContainer = document.getElementById("panels");
   var viewerPane = document.getElementById("viewer-pane");
   var collapseToggle = document.getElementById("viewer-collapse-toggle");
-  var layoutBtn = document.getElementById("btn-layout");
-  var layoutMenu = document.getElementById("layout-menu");
   function setLayoutMode(mode) {
     layoutMode = mode;
     const layoutClass = mode === "editor" ? "layout-editor-only" : mode === "viewer" ? "layout-viewer-only" : "layout-split";
     panelsContainer.classList.remove("layout-split", "layout-editor-only", "layout-viewer-only");
     panelsContainer.classList.add(layoutClass);
-    if (editorTab && viewerTab) {
-      const editorActive = mode !== "viewer";
-      editorTab.classList.toggle("active", editorActive);
-      viewerTab.classList.toggle("active", mode !== "editor");
-    }
-    if (layoutMenu) {
-      layoutMenu.querySelectorAll(".layout-option").forEach((el2) => {
-        el2.classList.toggle("active", el2.getAttribute("data-mode") === mode);
-      });
-    }
     sessionStorage.setItem("supergds-layout", mode);
     const editorPaneEl = document.getElementById("editor-pane");
     const viewerPaneEl = document.getElementById("viewer-pane");
@@ -9743,7 +9717,7 @@ ${h2.join(`
       item.style.paddingLeft = `${depth * 12 + 8}px`;
       const icon = document.createElement("span");
       icon.className = node.isFolder ? "folder-icon" : "file-icon";
-      icon.textContent = node.isFolder ? "\u{1F4C1}" : "\u{1F4C4}";
+      icon.textContent = node.isFolder ? "\u{1F4C1}" : isLayoutFile(node.path) ? "\u{1F5FA}\uFE0F" : "\u{1F4C4}";
       const name = document.createElement("span");
       name.className = "item-name";
       name.textContent = node.name;
@@ -9773,7 +9747,11 @@ ${h2.join(`
         container.appendChild(childContainer);
       } else {
         item.addEventListener("click", () => {
-          openFile(node.path);
+          if (isLayoutFile(node.path)) {
+            loadGdsIntoViewer(node.path);
+          } else {
+            openFile(node.path);
+          }
           container.querySelectorAll(".tree-item.selected").forEach((el2) => el2.classList.remove("selected"));
           item.classList.add("selected");
         });
@@ -9781,15 +9759,230 @@ ${h2.join(`
       }
     }
   }
-  async function openFile(filePath) {
-    currentFile = filePath;
-    sessionStorage.setItem("supergds-current-file", filePath);
-    setStudioCookie("file", filePath);
-    if (workspacePath) {
-      sessionStorage.setItem("supergds-workspace", workspacePath);
+  var editorTabs = [];
+  var activeEditorPath = null;
+  var viewerTabs = [];
+  var activeViewerId = null;
+  var currentGdsPath = null;
+  var watchedGds = null;
+  function escapeHtml(s15) {
+    return s15.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  }
+  function baseName(p) {
+    return (p || "").replace(/\\/g, "/").split("/").pop() || (p || "");
+  }
+  var LAYOUT_EXTS = /* @__PURE__ */ new Set(["gds", "oas"]);
+  function isLayoutFile(p) {
+    return LAYOUT_EXTS.has((p.split(".").pop() || "").toLowerCase());
+  }
+  function resolveWorkspacePath(p) {
+    if (!p) return p;
+    if (p.startsWith("/") || /^[A-Za-z]:[\\/]/.test(p)) return p;
+    const root = (workspacePath || "").replace(/[\\/]+$/, "");
+    return root ? `${root}/${p}` : p;
+  }
+  function renderEditorTabs() {
+    if (!editorTabsBar) return;
+    editorTabsBar.innerHTML = "";
+    if (editorTabs.length === 0) {
+      const hint = document.createElement("div");
+      hint.className = "group-tab-empty";
+      hint.textContent = "No file open \u2014 pick one from the Explorer";
+      editorTabsBar.appendChild(hint);
+      return;
     }
-    currentFileLabel.textContent = filePath.split("/").pop() || "No file open";
-    currentFileLabel.title = filePath;
+    for (const tab of editorTabs) {
+      const el2 = document.createElement("div");
+      el2.className = "group-tab" + (tab.path === activeEditorPath ? " active" : "") + (tab.dirty ? " dirty" : "");
+      el2.title = tab.path;
+      const label = document.createElement("span");
+      label.className = "group-tab-label";
+      label.textContent = baseName(tab.path);
+      el2.appendChild(label);
+      const close = document.createElement("button");
+      close.className = "tab-close";
+      close.title = "Close";
+      close.textContent = "\xD7";
+      close.addEventListener("click", (e) => {
+        e.stopPropagation();
+        closeEditorTab(tab.path);
+      });
+      el2.addEventListener("click", () => activateEditorTab(tab.path));
+      el2.addEventListener("auxclick", (e) => {
+        if (e.button === 1) {
+          e.preventDefault();
+          closeEditorTab(tab.path);
+        }
+      });
+      el2.appendChild(close);
+      editorTabsBar.appendChild(el2);
+    }
+  }
+  function activateEditorTab(path) {
+    const tab = editorTabs.find((t) => t.path === path);
+    if (!tab) return;
+    activeEditorPath = path;
+    currentFile = path;
+    editor.setModel(tab.model);
+    renderEditorTabs();
+  }
+  function closeEditorTab(path) {
+    const idx = editorTabs.findIndex((t) => t.path === path);
+    if (idx < 0) return;
+    const tab = editorTabs[idx];
+    editorTabs.splice(idx, 1);
+    try {
+      tab.model.dispose();
+    } catch (_2) {
+    }
+    if (activeEditorPath === path) {
+      const next = editorTabs[idx] || editorTabs[idx - 1] || null;
+      if (next) {
+        activateEditorTab(next.path);
+      } else {
+        activeEditorPath = null;
+        currentFile = null;
+        editor.setModel(null);
+        if (editorCompileBtn) editorCompileBtn.disabled = true;
+        if (viewerCompileBtn) viewerCompileBtn.disabled = true;
+      }
+    }
+    renderEditorTabs();
+  }
+  function renderViewerTabs() {
+    if (!viewerTabsBar) return;
+    viewerTabsBar.innerHTML = "";
+    if (viewerTabs.length === 0) {
+      const hint = document.createElement("div");
+      hint.className = "group-tab-empty";
+      hint.textContent = "No GDS built yet \u2014 press Compile";
+      viewerTabsBar.appendChild(hint);
+      return;
+    }
+    for (const tab of viewerTabs) {
+      const el2 = document.createElement("div");
+      el2.className = "group-tab" + (tab.id === activeViewerId ? " active" : "");
+      el2.title = tab.data?.gdsPath || tab.label;
+      const label = document.createElement("span");
+      label.className = "group-tab-label";
+      label.textContent = tab.label;
+      el2.appendChild(label);
+      const close = document.createElement("button");
+      close.className = "tab-close";
+      close.title = "Close";
+      close.textContent = "\xD7";
+      close.addEventListener("click", (e) => {
+        e.stopPropagation();
+        closeViewerTab(tab.id);
+      });
+      el2.addEventListener("click", () => activateViewerTab(tab.id));
+      el2.appendChild(close);
+      viewerTabsBar.appendChild(el2);
+    }
+  }
+  function activateViewerTab(id) {
+    const tab = viewerTabs.find((t) => t.id === id);
+    if (!tab) return;
+    activeViewerId = id;
+    bridge.sendLoadGds(tab.data);
+    if (tab.data?.gdsPath) seedWatchedGds(String(tab.data.gdsPath));
+    renderViewerTabs();
+  }
+  function closeViewerTab(id) {
+    const idx = viewerTabs.findIndex((t) => t.id === id);
+    if (idx < 0) return;
+    viewerTabs.splice(idx, 1);
+    if (activeViewerId === id) {
+      const next = viewerTabs[idx] || viewerTabs[idx - 1] || null;
+      if (next) {
+        activateViewerTab(next.id);
+      } else {
+        activeViewerId = null;
+        setLayoutMode("editor");
+      }
+    }
+    renderViewerTabs();
+  }
+  function addViewerTab(data) {
+    const raw = data?.gdsPath ? String(data.gdsPath) : "";
+    const id = raw.replace(/\\/g, "/") || "gds-" + (viewerTabs.length + 1);
+    const label = baseName(raw) || "GDS";
+    const existing = viewerTabs.find((t) => t.id === id);
+    if (existing) {
+      existing.data = data;
+      existing.label = label;
+    } else {
+      viewerTabs.push({ id, label, data });
+    }
+    activeViewerId = id;
+    bridge.sendLoadGds(data);
+    if (data?.gdsPath) currentGdsPath = String(data.gdsPath);
+    renderViewerTabs();
+  }
+  async function seedWatchedGds(gdsPath) {
+    if (!gdsPath) {
+      watchedGds = null;
+      return;
+    }
+    currentGdsPath = gdsPath;
+    try {
+      const r = await fetch("/api/gds-stat?path=" + encodeURIComponent(gdsPath));
+      if (!r.ok) return;
+      const { exists, mtimeMs } = await r.json();
+      watchedGds = exists ? { path: gdsPath, mtime: mtimeMs } : null;
+    } catch {
+    }
+  }
+  async function loadGdsIntoViewer(gdsPath) {
+    if (!gdsPath) return;
+    const absPath = resolveWorkspacePath(gdsPath);
+    const pythonPath = editorEnvSelect?.value;
+    try {
+      const res = await fetch("/api/parse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gdsPath: absPath, pythonPath })
+      });
+      if (!res.ok) return;
+      const { geojson, mode } = await res.json();
+      addViewerTab({ gdsPath: absPath, geojson, mode });
+      if (layoutMode === "editor") setLayoutMode("split");
+    } catch (e) {
+      console.error("[loadGdsIntoViewer] failed", e);
+    } finally {
+      seedWatchedGds(absPath);
+    }
+  }
+  var lastMtimePoll = 0;
+  function pollGdsMtime() {
+    const now = Date.now();
+    if (now - lastMtimePoll < 2e3) return;
+    lastMtimePoll = now;
+    const gdsPath = currentGdsPath;
+    if (!gdsPath) return;
+    fetch("/api/gds-stat?path=" + encodeURIComponent(gdsPath)).then((res) => res.ok ? res.json() : { exists: false, mtimeMs: 0 }).then(({ exists, mtimeMs }) => {
+      if (!exists) return;
+      if (!watchedGds || watchedGds.path !== gdsPath) {
+        watchedGds = { path: gdsPath, mtime: mtimeMs };
+        return;
+      }
+      if (mtimeMs > watchedGds.mtime) {
+        watchedGds.mtime = mtimeMs;
+        loadGdsIntoViewer(gdsPath);
+      }
+    }).catch(() => {
+    });
+  }
+  async function openFile(filePath) {
+    const existing = editorTabs.find((t) => t.path === filePath);
+    if (existing) {
+      activateEditorTab(filePath);
+      currentFile = filePath;
+      infoState.file = filePath;
+      renderInfoPanel();
+      pushOpenFileState(filePath);
+      return;
+    }
     const res = await fetch(`/files/${filePath}`);
     if (!res.ok) {
       console.error("Failed to open file:", res.status);
@@ -9797,16 +9990,38 @@ ${h2.join(`
       return;
     }
     const { content } = await res.json();
-    editor.setValue(content);
+    const monacoObj = window.monaco;
+    const uri = monacoObj.Uri.parse("file:///" + filePath.replace(/\\/g, "/"));
+    let model = monacoObj.editor.getModel(uri);
+    if (!model) model = monacoObj.editor.createModel(content || "", "python", uri);
+    model.onDidChangeContent(() => {
+      const tab = editorTabs.find((t) => t.path === filePath);
+      if (tab && !tab.dirty) {
+        tab.dirty = true;
+        renderEditorTabs();
+      }
+    });
+    editorTabs.push({ path: filePath, model, dirty: false });
+    currentFile = filePath;
+    infoState.file = filePath;
+    renderInfoPanel();
+    logEvent("system", "Opened " + filePath);
+    sessionStorage.setItem("supergds-current-file", filePath);
+    setStudioCookie("file", filePath);
+    if (workspacePath) sessionStorage.setItem("supergds-workspace", workspacePath);
+    activateEditorTab(filePath);
     window.studio.currentFile = filePath;
+    pushOpenFileState(filePath);
+    if (editorCompileBtn) editorCompileBtn.disabled = false;
+    if (viewerCompileBtn) viewerCompileBtn.disabled = false;
+  }
+  function pushOpenFileState(filePath) {
     fetch("/api/ide-state", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ type: "openFile", file: filePath })
     }).catch(() => {
     });
-    runBtn.disabled = false;
-    rebuildBtn.disabled = false;
   }
   function jumpToLine(line) {
     if (!editor) return;
@@ -9845,8 +10060,25 @@ ${h2.join(`
     setStudioCookie("project", folderPath);
     await loadFileTree();
   }
+  function renderEnvOptions(envs) {
+    for (const sel of envSelects) {
+      sel.innerHTML = "";
+      if (envs.length === 0) {
+        sel.innerHTML = '<option value="">No env found \u2014 using default</option>';
+        continue;
+      }
+      for (const env of envs) {
+        const option = document.createElement("option");
+        option.value = env.path;
+        option.textContent = env.name;
+        option.title = env.path;
+        if (env.isActive) option.selected = true;
+        sel.appendChild(option);
+      }
+    }
+  }
   async function loadPythonEnvironments() {
-    if (!pythonEnvSelect) return;
+    if (envSelects.length === 0) return;
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 1e4);
@@ -9854,49 +10086,39 @@ ${h2.join(`
       clearTimeout(timeout);
       if (!res.ok) {
         console.error("Failed to load Python environments:", res.status);
-        pythonEnvSelect.innerHTML = '<option value="">Python (default)</option>';
+        for (const sel of envSelects) sel.innerHTML = '<option value="">Python (default)</option>';
         return;
       }
       const { environments } = await res.json();
-      pythonEnvSelect.innerHTML = "";
-      if (environments.length === 0) {
-        pythonEnvSelect.innerHTML = '<option value="">No env found \u2014 using default</option>';
-        return;
-      }
-      for (const env of environments) {
-        const option = document.createElement("option");
-        option.value = env.path;
-        option.textContent = env.name;
-        option.title = env.path;
-        if (env.isActive) {
-          option.selected = true;
-        }
-        pythonEnvSelect.appendChild(option);
-      }
+      renderEnvOptions(environments);
     } catch (err) {
       console.error("Error loading Python environments:", err);
-      if (pythonEnvSelect) {
-        pythonEnvSelect.innerHTML = '<option value="">Python (default)</option>';
-      }
+      for (const sel of envSelects) sel.innerHTML = '<option value="">Python (default)</option>';
     }
   }
   async function initPythonEnv() {
     await loadPythonEnvironments();
-    if (!pythonEnvSelect) return;
     const saved = getStudioCookie("python-env");
     if (saved) {
-      for (const opt of Array.from(pythonEnvSelect.options)) {
-        if (opt.value === saved) {
-          pythonEnvSelect.value = saved;
-          break;
+      for (const sel of envSelects) {
+        for (const opt of Array.from(sel.options)) {
+          if (opt.value === saved) {
+            sel.value = saved;
+            break;
+          }
         }
       }
     }
-    pythonEnvSelect.addEventListener("change", () => {
-      if (pythonEnvSelect.value) {
-        setStudioCookie("python-env", pythonEnvSelect.value);
-      }
-    });
+    for (const sel of envSelects) {
+      sel.addEventListener("change", () => {
+        if (sel.value) setStudioCookie("python-env", sel.value);
+        for (const other of envSelects) {
+          if (other !== sel) other.value = sel.value;
+        }
+        renderInfoPanel();
+        logEvent("system", `Python env \u2192 ${sel.selectedOptions[0]?.textContent?.trim() || sel.value || "default"}`);
+      });
+    }
   }
   async function loadFileTree() {
     const expandedPaths = /* @__PURE__ */ new Set();
@@ -9918,7 +10140,7 @@ ${h2.join(`
     }
     const displayFiles = files.filter((f) => {
       const ext = f.split(".").pop()?.toLowerCase();
-      return ["py", "json", "ts", "js", "md", "txt", "yaml", "yml", "toml", "cfg", "ini"].includes(ext || "");
+      return ["py", "json", "ts", "js", "md", "txt", "yaml", "yml", "toml", "cfg", "ini"].includes(ext || "") || isLayoutFile(f);
     });
     const tree = buildFileTree(displayFiles);
     renderFileTree(tree, fileTree);
@@ -9948,21 +10170,28 @@ ${h2.join(`
   }
   async function saveCurrentFile() {
     if (!currentFile) return;
-    const content = editor.getValue();
+    const tab = editorTabs.find((t) => t.path === currentFile);
+    const content = tab ? tab.model.getValue() : editor.getValue();
     await fetch(`/files/${currentFile}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content })
     });
+    if (tab) {
+      tab.dirty = false;
+      renderEditorTabs();
+    }
   }
-  async function handleRun() {
+  async function compile() {
     if (!currentFile) return;
     await saveCurrentFile();
     terminal.clear();
-    const pythonPath = pythonEnvSelect?.value;
+    const pythonPath = editorEnvSelect?.value;
     const pythonPathParam = pythonPath ? `&pythonPath=${encodeURIComponent(pythonPath)}` : "";
-    const envLabel = pythonEnvSelect?.selectedOptions[0]?.textContent?.trim() || "default";
+    const envLabel = editorEnvSelect?.selectedOptions[0]?.textContent?.trim() || "default";
     terminal.addLine("system", `$ python (${envLabel}) ${currentFile}`);
+    setInfoStatus("building\u2026", "\u2014", null);
+    logEvent("system", `Compile: ${currentFile} (${envLabel})`);
     let completed = false;
     const es2 = new EventSource(`/api/run?pythonFile=${encodeURIComponent(currentFile)}${pythonPathParam}`);
     es2.addEventListener("start", (e) => terminal.addLine("stdout", JSON.parse(e.data).status));
@@ -9971,7 +10200,9 @@ ${h2.join(`
     es2.addEventListener("complete", (e) => {
       completed = true;
       const data = JSON.parse(e.data);
-      bridge.sendLoadGds(data);
+      addViewerTab(data);
+      seedWatchedGds(data.gdsPath || null);
+      if (layoutMode === "editor") setLayoutMode("split");
       const geojson = data.geojson;
       if (geojson?.features) {
         const sources = /* @__PURE__ */ new Map();
@@ -10003,6 +10234,9 @@ ${h2.join(`
         }
       }
       terminal.addLine("system", "Done.");
+      const gdsName = data.gdsPath ? String(data.gdsPath).split(/[/\\]/).pop() : null;
+      setInfoStatus("OK", gdsName || "\u2014", geojson?.features?.length ?? null);
+      logEvent("stdout", `Build OK \u2014 ${gdsName || "no GDS"} (${geojson?.features?.length ?? 0} features)`);
       es2.close();
       fetch("/api/ide-state", {
         method: "POST",
@@ -10033,6 +10267,8 @@ ${h2.join(`
       } else {
         terminal.addLine("stderr", "Run failed \u2014 connection lost.");
       }
+      setInfoStatus("failed", "\u2014", null);
+      logEvent("stderr", "Build failed");
       es2.close();
       fetch("/api/ide-state", {
         method: "POST",
@@ -10051,62 +10287,10 @@ ${h2.join(`
       });
     });
   }
-  async function handleRebuild() {
-    await handleRun();
-  }
-  function initXterm() {
+  function initTermPanel() {
     const container = document.getElementById("terminal-xterm");
     if (!container) return;
-    xterm = new Dl({
-      cursorBlink: true,
-      fontSize: 13,
-      fontFamily: "'Cascadia Code', 'Fira Code', monospace",
-      theme: {
-        background: "#11111b",
-        foreground: "#cdd6f4",
-        cursor: "#89b4fa",
-        selectionBackground: "#45475a"
-      }
-    });
-    xtermFitAddon = new o();
-    xterm.loadAddon(xtermFitAddon);
-    xterm.open(container);
-    setTimeout(() => {
-      try {
-        xtermFitAddon.fit();
-      } catch {
-      }
-    }, 100);
-    connectTerminalWs();
-  }
-  function connectTerminalWs() {
-    if (!xterm) return;
-    const wsProtocol = location.protocol === "https:" ? "wss:" : "ws:";
-    xtermWs = new WebSocket(`${wsProtocol}//${location.host}/api/terminal`);
-    xterm?.write("\x1B[90mConnecting...\x1B[0m\r");
-    xtermWs.onopen = () => {
-      xterm?.write("\r\x1B[K");
-      if (xtermFitAddon && xterm) {
-        const dims = xtermFitAddon.proposeDimensions();
-        if (dims) {
-          xtermWs?.send(JSON.stringify({ type: "resize", cols: dims.cols, rows: dims.rows }));
-        }
-      }
-    };
-    xtermWs.onmessage = (ev) => {
-      xterm?.write(ev.data);
-    };
-    xtermWs.onclose = () => {
-      xterm?.write("\r\n\x1B[90m\u2014 connection lost, reopen tab to reconnect \u2014\x1B[0m\r\n");
-    };
-    xtermWs.onerror = () => {
-      xterm?.write("\r\n\x1B[31mTerminal connection error\x1B[0m\r\n");
-    };
-    xterm.onData((data) => {
-      if (xtermWs?.readyState === WebSocket.OPEN) {
-        xtermWs.send(data);
-      }
-    });
+    termPanel = new window.TermPanel(container, { Terminal: Dl, FitAddon: o });
   }
   function setupBottomPanel() {
     const TabManagerClass = window.TabManager;
@@ -10123,18 +10307,7 @@ ${h2.join(`
       active: true,
       onActivate: () => {
         activeTerminalTab = "terminal";
-        if (xtermFitAddon && xterm) {
-          setTimeout(() => {
-            try {
-              xtermFitAddon.fit();
-              const dims = xtermFitAddon.proposeDimensions();
-              if (dims && xtermWs?.readyState === WebSocket.OPEN) {
-                xtermWs.send(JSON.stringify({ type: "resize", cols: dims.cols, rows: dims.rows }));
-              }
-            } catch {
-            }
-          }, 50);
-        }
+        setTimeout(() => termPanel?.fitActive(), 50);
       }
     });
     tabManager.addTab("output", "Output", outputPanel, {
@@ -10145,6 +10318,18 @@ ${h2.join(`
     tabManager.addTab("problems", "Problems", problemsPanel, {
       onActivate: () => {
         activeTerminalTab = "problems";
+      }
+    });
+    const infoPanel = document.getElementById("terminal-info");
+    tabManager.addTab("info", "Info", infoPanel, {
+      onActivate: () => {
+        activeTerminalTab = "info";
+      }
+    });
+    const logPanel = document.getElementById("terminal-log");
+    tabManager.addTab("log", "Log", logPanel, {
+      onActivate: () => {
+        activeTerminalTab = "log";
       }
     });
     tabManager.addAvailableTab("source", "Source", () => {
@@ -10160,11 +10345,63 @@ ${h2.join(`
       panel.__cleanup = () => window.removeEventListener("gds-selection", handler);
       return { el: panel };
     }, "\u{1F4CB}");
-    new MutationObserver(() => {
-      if (xtermPanel.style.display !== "none" && xtermWs?.readyState !== WebSocket.OPEN) {
-        connectTerminalWs();
-      }
-    }).observe(xtermPanel, { attributes: true, attributeFilter: ["style"] });
+    tabManager.addAvailableTab("help", "Help", () => {
+      const panel = document.createElement("div");
+      panel.className = "terminal-tab-panel";
+      panel.style.cssText = "padding:12px 16px;font:12px/1.6 'Cascadia Code','Fira Code',monospace;color:#cdd6f4;overflow-y:auto;";
+      panel.innerHTML = [
+        '<div style="color:#89b4fa;font-weight:600;font-size:13px;margin-bottom:8px;">Keyboard Shortcuts</div>',
+        '<div style="display:grid;grid-template-columns:120px 1fr;gap:4px 12px;">',
+        '<span style="color:#f9e2af;">Ctrl+S</span><span>Save current file</span>',
+        '<span style="color:#f9e2af;">Ctrl+Enter</span><span>Compile (run the active script)</span>',
+        '<span style="color:#f9e2af;">Ctrl+\\</span><span>Toggle the viewer pane</span>',
+        '<span style="color:#f9e2af;">\u29C9</span><span>Open a pane in a new window</span>',
+        "</div>"
+      ].join("\n");
+      return { el: panel };
+    }, "\u2753");
+    initInfoLogPanels();
+    renderInfoPanel();
+  }
+  var infoState = {};
+  function renderInfoPanel() {
+    const panel = document.getElementById("terminal-info");
+    if (!panel) return;
+    const envLabel = editorEnvSelect?.selectedOptions[0]?.textContent?.trim() || "default";
+    const rows = [
+      ["File", infoState.file || "\u2014"],
+      ["Env", envLabel],
+      ["Status", infoState.status || "idle", infoState.status === "OK"],
+      ["GDS", infoState.gds || "\u2014"],
+      ["Components", infoState.components != null ? String(infoState.components) : "\u2014"]
+    ];
+    panel.innerHTML = rows.map(([k, v2, hl2]) => `<div class="kv"><span class="key">${k}</span><span class="val${hl2 ? " hl" : ""}">${escapeHtml(v2)}</span></div>`).join("");
+  }
+  function setInfoStatus(status, gds, components) {
+    infoState.status = status;
+    if (gds !== void 0) infoState.gds = gds;
+    if (components !== void 0) infoState.components = components;
+    renderInfoPanel();
+  }
+  function logEvent(level, msg) {
+    const panel = document.getElementById("terminal-log");
+    if (!panel) return;
+    const ph = panel.querySelector(".placeholder");
+    if (ph) panel.innerHTML = "";
+    const line = document.createElement("div");
+    line.className = level;
+    const ts2 = (/* @__PURE__ */ new Date()).toLocaleTimeString();
+    line.innerHTML = `<span class="timestamp">[${ts2}]</span> ${escapeHtml(msg)}`;
+    panel.appendChild(line);
+    panel.scrollTop = panel.scrollHeight;
+  }
+  function initInfoLogPanels() {
+    const info = document.getElementById("terminal-info");
+    const log = document.getElementById("terminal-log");
+    if (info) info.innerHTML = '<p class="placeholder">Build status will appear here</p>';
+    if (log) {
+      log.innerHTML = '<p class="placeholder">Events will appear here</p>';
+    }
   }
   var lastCommandPoll = 0;
   function pollMcpCommands() {
@@ -10177,6 +10414,8 @@ ${h2.join(`
           jumpToLine(cmd.line);
         } else if (cmd.type === "selectBySource") {
           bridge?.sendSelectBySource(cmd.file, cmd.line);
+        } else if (cmd.type === "reloadGds" && cmd.gdsPath) {
+          loadGdsIntoViewer(cmd.gdsPath);
         }
       }
     }).catch(() => {
@@ -10189,13 +10428,8 @@ ${h2.join(`
     if (icon) icon.textContent = collapsed ? "\u25B6" : "\u25BC";
     const handle = document.getElementById("terminal-resize-handle");
     if (handle) handle.style.display = collapsed ? "none" : "";
-    if (!collapsed && xtermFitAddon && xterm) {
-      setTimeout(() => {
-        try {
-          xtermFitAddon.fit();
-        } catch {
-        }
-      }, 50);
+    if (!collapsed) {
+      setTimeout(() => termPanel?.fitActive(), 50);
     }
   }
   function init() {
@@ -10203,39 +10437,31 @@ ${h2.join(`
     terminal = new window.TerminalRenderer(terminalBody);
     bridge = new window.IframeBridge(iframeViewer);
     try {
-      initXterm();
+      initTermPanel();
     } catch (e) {
-      console.error("xterm init failed:", e);
+      console.error("terminal panel init failed:", e);
     }
     setupBottomPanel();
     setupMenuBar();
     setupSidebar();
-    runBtn.addEventListener("click", handleRun);
-    rebuildBtn.addEventListener("click", handleRebuild);
+    editorCompileBtn?.addEventListener("click", compile);
+    viewerCompileBtn?.addEventListener("click", compile);
+    editorPopoutBtn?.addEventListener("click", () => {
+      const f = currentFile ? encodeURIComponent(currentFile) : "";
+      window.open("/editor/editor.html" + (f ? "?file=" + f : ""), "_blank");
+    });
+    viewerPopoutBtn?.addEventListener("click", () => {
+      window.open("/viewer/viewer.html?popout=1", "_blank");
+    });
     window.studio = { editor, bridge, terminal, currentFile: null, openFile, jumpToLine };
     restoreWorkspace();
     initPythonEnv();
     setInterval(pollMcpCommands, 1e3);
+    setInterval(pollGdsMtime, 1e3);
     const savedLayout = sessionStorage.getItem("supergds-layout");
     setLayoutMode(savedLayout || "split");
-    if (layoutBtn) {
-      layoutBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        layoutMenu?.classList.toggle("hidden");
-      });
-    }
-    document.addEventListener("click", () => {
-      layoutMenu.classList.add("hidden");
-    });
-    if (layoutMenu) {
-      layoutMenu.querySelectorAll(".layout-option").forEach((el2) => {
-        el2.addEventListener("click", () => {
-          const mode = el2.getAttribute("data-mode");
-          setLayoutMode(mode);
-          layoutMenu.classList.add("hidden");
-        });
-      });
-    }
+    renderEditorTabs();
+    renderViewerTabs();
     if (collapseToggle) {
       collapseToggle.addEventListener("click", () => {
         if (layoutMode === "split") {
@@ -10248,19 +10474,6 @@ ${h2.join(`
     const terminalCollapse = document.getElementById("terminal-collapse");
     if (terminalCollapse) {
       terminalCollapse.addEventListener("click", () => toggleTerminal());
-    }
-    if (viewerTabClose) {
-      viewerTabClose.addEventListener("click", (e) => {
-        e.stopPropagation();
-        setLayoutMode("editor");
-      });
-    }
-    const openNewTabOption = document.getElementById("open-viewer-new-tab");
-    if (openNewTabOption) {
-      openNewTabOption.addEventListener("click", () => {
-        window.open("/viewer/viewer.html", "_blank");
-        layoutMenu?.classList.add("hidden");
-      });
     }
     document.addEventListener("keydown", (e) => {
       if (!e.ctrlKey) return;
@@ -10277,6 +10490,34 @@ ${h2.join(`
       } else if (e.key === "ArrowDown") {
         e.preventDefault();
         setLayoutMode("split");
+      }
+    });
+    window.addEventListener("message", (e) => {
+      const msg = e.data || {};
+      if (msg.type === "popupReady") {
+        const payload = { type: "popupState", pane: msg.pane };
+        if (msg.pane === "editor") {
+          payload.editorState = {
+            openTabs: editorTabs.map((t) => ({ path: t.path, content: t.model.getValue(), dirty: t.dirty })),
+            activePath: activeEditorPath,
+            env: editorEnvSelect?.value || ""
+          };
+        } else {
+          payload.viewerState = {
+            tabs: viewerTabs.map((t) => ({ id: t.id, label: t.label, data: t.data })),
+            activeId: activeViewerId,
+            env: viewerEnvSelect?.value || ""
+          };
+        }
+        e.source?.postMessage(payload, "*");
+        return;
+      }
+      if (msg.type === "dockBack") {
+        setLayoutMode("split");
+        if (msg.pane === "editor" && currentFile) openFile(currentFile);
+      } else if (msg.type === "standaloneResult" && msg.data) {
+        addViewerTab(msg.data);
+        if (layoutMode === "editor") setLayoutMode("split");
       }
     });
     const resizeHandle = new ResizeHandle("resize-handle", "editor-pane", "viewer-pane");

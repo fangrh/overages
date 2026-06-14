@@ -1,5 +1,6 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import type { TermPanel } from './termPanel.js';
 
 // Use window-based access for classes exposed by other chunks
 // These are set by their respective modules after loading
@@ -56,10 +57,8 @@ function clearStudioCookie(name: string): void {
   document.cookie = `${STUDIO_COOKIE_PREFIX}${name}=; max-age=0; path=/; SameSite=Lax`;
 }
 
-// xterm.js terminal
-let xterm: any = null;
-let xtermFitAddon: any = null;
-let xtermWs: WebSocket | null = null;
+// xterm.js terminal — a multi-terminal panel (VS Code-style: N shells, +/× tabs)
+let termPanel: TermPanel | null = null;
 let activeTerminalTab: string = 'terminal';
 let tabManager: any = null; // TabManager instance for bottom panel
 
@@ -242,10 +241,8 @@ class TerminalResizeHandle {
       const maxHeight = containerHeight - 120; // leave room for editor/viewer
       const clamped = Math.max(minHeight, Math.min(maxHeight, newHeight));
       this.terminal.style.height = `${clamped}px`;
-      // Refit xterm live so glyphs reflow during the drag
-      if (xtermFitAddon && xterm) {
-        try { xtermFitAddon.fit(); } catch {}
-      }
+      // Refit the active terminal live so glyphs reflow during the drag
+      termPanel?.fitActive();
     });
 
     const endDrag = (e: PointerEvent) => {
@@ -254,15 +251,7 @@ class TerminalResizeHandle {
       this.handle.classList.remove('dragging');
       this.handle.releasePointerCapture(e.pointerId);
       // Final refit + tell the pty the new terminal dimensions
-      if (xtermFitAddon && xterm) {
-        try {
-          xtermFitAddon.fit();
-          const dims = xtermFitAddon.proposeDimensions();
-          if (dims && xtermWs?.readyState === WebSocket.OPEN) {
-            xtermWs.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
-          }
-        } catch {}
-      }
+      termPanel?.fitActive();
       // Notify the viewer iframe to relayout its map (if visible)
       const iframe = document.getElementById('gds-viewer') as HTMLIFrameElement;
       iframe?.contentWindow?.postMessage({ type: 'resize' }, '*');
@@ -278,22 +267,25 @@ class TerminalResizeHandle {
 }
 
 // DOM Elements
-const runBtn = document.getElementById('run-btn') as HTMLButtonElement;
-const rebuildBtn = document.getElementById('rebuild-btn') as HTMLButtonElement;
 const monacoContainer = document.getElementById('monaco-editor')!;
 const iframeViewer = document.getElementById('gds-viewer') as HTMLIFrameElement;
 const terminalBody = document.getElementById('terminal-output')!;
 const fileTree = document.getElementById('file-tree')!;
 const sidebar = document.getElementById('sidebar')!;
-const currentFileLabel = document.getElementById('current-file')!;
 const menuFile = document.getElementById('menu-file')!;
 const menuOpenFolder = document.getElementById('menu-open-folder')!;
-const pythonEnvSelect = document.getElementById('python-env-select') as HTMLSelectElement;;
 
-// Tab bar
-const editorTab = document.getElementById('editor-tab');
-const viewerTab = document.getElementById('viewer-tab');
-const viewerTabClose = document.getElementById('viewer-tab-close');
+// Per-group controls (VS Code split: each pane has its own Compile / env / popout).
+const editorCompileBtn = document.getElementById('editor-compile-btn') as HTMLButtonElement;
+const viewerCompileBtn = document.getElementById('viewer-compile-btn') as HTMLButtonElement;
+const editorEnvSelect = document.getElementById('editor-env-select') as HTMLSelectElement;
+const viewerEnvSelect = document.getElementById('viewer-env-select') as HTMLSelectElement;
+const editorPopoutBtn = document.getElementById('editor-popout-btn') as HTMLButtonElement;
+const viewerPopoutBtn = document.getElementById('viewer-popout-btn') as HTMLButtonElement;
+const editorTabsBar = document.getElementById('editor-group-tabs')!;
+const viewerTabsBar = document.getElementById('viewer-group-tabs')!;
+// Both env selects share one selection — editor + viewer panes stay in sync.
+const envSelects: HTMLSelectElement[] = [editorEnvSelect, viewerEnvSelect];
 
 // Layout mode
 type LayoutMode = 'split' | 'editor' | 'viewer';
@@ -302,8 +294,6 @@ let layoutMode: LayoutMode = 'split';
 const panelsContainer = document.getElementById('panels')!;
 const viewerPane = document.getElementById('viewer-pane')!;
 const collapseToggle = document.getElementById('viewer-collapse-toggle')!;
-const layoutBtn = document.getElementById('btn-layout')!;
-const layoutMenu = document.getElementById('layout-menu')!;
 
 function setLayoutMode(mode: LayoutMode) {
   layoutMode = mode;
@@ -312,18 +302,9 @@ function setLayoutMode(mode: LayoutMode) {
                       mode === 'viewer' ? 'layout-viewer-only' : 'layout-split';
   panelsContainer.classList.remove('layout-split', 'layout-editor-only', 'layout-viewer-only');
   panelsContainer.classList.add(layoutClass);
-  // Update tab active states
-  if (editorTab && viewerTab) {
-    const editorActive = mode !== 'viewer';
-    editorTab.classList.toggle('active', editorActive);
-    viewerTab.classList.toggle('active', mode !== 'editor');
-  }
-  // Update menu active state
-  if (layoutMenu) {
-    layoutMenu.querySelectorAll('.layout-option').forEach(el => {
-      el.classList.toggle('active', el.getAttribute('data-mode') === mode);
-    });
-  }
+  // (Per-group tabs are always active within their own pane; pane visibility is
+  // driven entirely by the layout-* classes above, so there's no global tab
+  // state to sync here.)
   // Persist
   sessionStorage.setItem('supergds-layout', mode);
   // Clear inline widths when not in split mode so flex takes over
@@ -761,7 +742,9 @@ function renderFileTree(nodes: FileNode[], container: HTMLElement, depth = 0) {
 
     const icon = document.createElement('span');
     icon.className = node.isFolder ? 'folder-icon' : 'file-icon';
-    icon.textContent = node.isFolder ? '📁' : '📄';
+    // Layout files get a distinct icon so it's clear they open in the viewer.
+    icon.textContent = node.isFolder ? '📁'
+      : (isLayoutFile(node.path) ? '🗺️' : '📄');
 
     const name = document.createElement('span');
     name.className = 'item-name';
@@ -796,7 +779,13 @@ function renderFileTree(nodes: FileNode[], container: HTMLElement, depth = 0) {
       container.appendChild(childContainer);
     } else {
       item.addEventListener('click', () => {
-        openFile(node.path);
+        if (isLayoutFile(node.path)) {
+          // A built layout — load it into the GDS viewer, not the text editor
+          // (a binary .gds in Monaco would render as garbage).
+          loadGdsIntoViewer(node.path);
+        } else {
+          openFile(node.path);
+        }
         // Update selection
         container.querySelectorAll('.tree-item.selected').forEach(el => el.classList.remove('selected'));
         item.classList.add('selected');
@@ -806,16 +795,293 @@ function renderFileTree(nodes: FileNode[], container: HTMLElement, depth = 0) {
   }
 }
 
-async function openFile(filePath: string) {
-  currentFile = filePath;
-  sessionStorage.setItem('supergds-current-file', filePath);
-  setStudioCookie('file', filePath);
-  if (workspacePath) {
-    sessionStorage.setItem('supergds-workspace', workspacePath);
-  }
-  currentFileLabel.textContent = filePath.split('/').pop() || 'No file open';
-  currentFileLabel.title = filePath;
+// ============================================================
+// Editor file tabs (multi-.py) — one Monaco model per open file,
+// so switching tabs preserves each file's undo history. (Replaces
+// the old single-instance editor.setValue() content swap.)
+// ============================================================
+interface EditorTab {
+  path: string;
+  model: any; // monaco.editor.ITextModel
+  dirty: boolean;
+}
+let editorTabs: EditorTab[] = [];
+let activeEditorPath: string | null = null;
 
+// ============================================================
+// Viewer result tabs (multi-GDS) — one cached loadGds payload per
+// built file, keyed by gds path. Switching re-sends loadGds.
+// ============================================================
+interface ViewerTab {
+  id: string;   // normalized gdsPath, or synthetic id
+  label: string;
+  data: any;    // the /api/run complete payload
+}
+let viewerTabs: ViewerTab[] = [];
+let activeViewerId: string | null = null;
+
+// The GDS file currently shown in the viewer, plus the mtime we last loaded it
+// at. The mtime-poller watches this so that builds triggered OUTSIDE the
+// Compile button (an LLM run_script, or a command typed in the terminal) still
+// refresh the viewer — those channels write a new .gds to disk without going
+// through compile(), so the only signal is the file's modification time.
+let currentGdsPath: string | null = null;
+let watchedGds: { path: string; mtime: number } | null = null;
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+}
+function baseName(p: string): string {
+  return (p || '').replace(/\\/g, '/').split('/').pop() || (p || '');
+}
+
+// Layout (binary) outputs a compiled .py produces. These open in the GDS
+// viewer, never the text editor (loading a binary .gds into Monaco is
+// garbage), and must appear in the explorer so a freshly-built file is
+// visible — previously the tree listed only text extensions, so a new .gds
+// was generated but never shown.
+const LAYOUT_EXTS = new Set(['gds', 'oas']);
+function isLayoutFile(p: string): boolean {
+  return LAYOUT_EXTS.has((p.split('.').pop() || '').toLowerCase());
+}
+
+// Resolve a file-tree path (workspace-relative) to an absolute path. /api/parse
+// requires an absolute gdsPath, and viewer tab ids are the absolute gdsPath (as
+// /api/run returns), so resolving here keeps a tree-click in sync with a build
+// (refreshes the same tab instead of opening a duplicate).
+function resolveWorkspacePath(p: string): string {
+  if (!p) return p;
+  if (p.startsWith('/') || /^[A-Za-z]:[\\/]/.test(p)) return p; // already absolute
+  const root = (workspacePath || '').replace(/[\\/]+$/, '');
+  return root ? `${root}/${p}` : p;
+}
+
+function renderEditorTabs() {
+  if (!editorTabsBar) return;
+  editorTabsBar.innerHTML = '';
+  if (editorTabs.length === 0) {
+    const hint = document.createElement('div');
+    hint.className = 'group-tab-empty';
+    hint.textContent = 'No file open — pick one from the Explorer';
+    editorTabsBar.appendChild(hint);
+    return;
+  }
+  for (const tab of editorTabs) {
+    const el = document.createElement('div');
+    el.className = 'group-tab' +
+      (tab.path === activeEditorPath ? ' active' : '') +
+      (tab.dirty ? ' dirty' : '');
+    el.title = tab.path;
+    const label = document.createElement('span');
+    label.className = 'group-tab-label';
+    label.textContent = baseName(tab.path);
+    el.appendChild(label);
+    const close = document.createElement('button');
+    close.className = 'tab-close';
+    close.title = 'Close';
+    close.textContent = '×';
+    close.addEventListener('click', (e) => { e.stopPropagation(); closeEditorTab(tab.path); });
+    el.addEventListener('click', () => activateEditorTab(tab.path));
+    el.addEventListener('auxclick', (e) => {
+      if ((e as MouseEvent).button === 1) { e.preventDefault(); closeEditorTab(tab.path); }
+    });
+    el.appendChild(close);
+    editorTabsBar.appendChild(el);
+  }
+}
+
+function activateEditorTab(path: string) {
+  const tab = editorTabs.find(t => t.path === path);
+  if (!tab) return;
+  activeEditorPath = path;
+  currentFile = path;
+  editor.setModel(tab.model);
+  renderEditorTabs();
+}
+
+function closeEditorTab(path: string) {
+  const idx = editorTabs.findIndex(t => t.path === path);
+  if (idx < 0) return;
+  const tab = editorTabs[idx];
+  editorTabs.splice(idx, 1);
+  try { tab.model.dispose(); } catch (_) {}
+  if (activeEditorPath === path) {
+    // Activate a neighbor (prefer the one now occupying the same slot).
+    const next = editorTabs[idx] || editorTabs[idx - 1] || null;
+    if (next) {
+      activateEditorTab(next.path);
+    } else {
+      activeEditorPath = null;
+      currentFile = null;
+      editor.setModel(null);
+      if (editorCompileBtn) editorCompileBtn.disabled = true;
+      if (viewerCompileBtn) viewerCompileBtn.disabled = true;
+    }
+  }
+  renderEditorTabs();
+}
+
+function renderViewerTabs() {
+  if (!viewerTabsBar) return;
+  viewerTabsBar.innerHTML = '';
+  if (viewerTabs.length === 0) {
+    const hint = document.createElement('div');
+    hint.className = 'group-tab-empty';
+    hint.textContent = 'No GDS built yet — press Compile';
+    viewerTabsBar.appendChild(hint);
+    return;
+  }
+  for (const tab of viewerTabs) {
+    const el = document.createElement('div');
+    el.className = 'group-tab' + (tab.id === activeViewerId ? ' active' : '');
+    el.title = (tab.data?.gdsPath as string) || tab.label;
+    const label = document.createElement('span');
+    label.className = 'group-tab-label';
+    label.textContent = tab.label;
+    el.appendChild(label);
+    const close = document.createElement('button');
+    close.className = 'tab-close';
+    close.title = 'Close';
+    close.textContent = '×';
+    close.addEventListener('click', (e) => { e.stopPropagation(); closeViewerTab(tab.id); });
+    el.addEventListener('click', () => activateViewerTab(tab.id));
+    el.appendChild(close);
+    viewerTabsBar.appendChild(el);
+  }
+}
+
+function activateViewerTab(id: string) {
+  const tab = viewerTabs.find(t => t.id === id);
+  if (!tab) return;
+  activeViewerId = id;
+  bridge.sendLoadGds(tab.data);
+  // Re-target the mtime poller at this tab's GDS (switching viewer tabs).
+  if (tab.data?.gdsPath) seedWatchedGds(String(tab.data.gdsPath));
+  renderViewerTabs();
+}
+
+function closeViewerTab(id: string) {
+  const idx = viewerTabs.findIndex(t => t.id === id);
+  if (idx < 0) return;
+  viewerTabs.splice(idx, 1);
+  if (activeViewerId === id) {
+    const next = viewerTabs[idx] || viewerTabs[idx - 1] || null;
+    if (next) {
+      activateViewerTab(next.id);
+    } else {
+      activeViewerId = null;
+      // No results left — drop back to editor-only so the empty viewer isn't shown.
+      setLayoutMode('editor');
+    }
+  }
+  renderViewerTabs();
+}
+
+// Add (or refresh) the GDS result tab for a build and bring it to the front.
+function addViewerTab(data: any) {
+  const raw = data?.gdsPath ? String(data.gdsPath) : '';
+  const id = raw.replace(/\\/g, '/') || ('gds-' + (viewerTabs.length + 1));
+  const label = baseName(raw) || 'GDS';
+  const existing = viewerTabs.find(t => t.id === id);
+  if (existing) {
+    existing.data = data;
+    existing.label = label;
+  } else {
+    viewerTabs.push({ id, label, data });
+  }
+  activeViewerId = id;
+  bridge.sendLoadGds(data);
+  if (data?.gdsPath) currentGdsPath = String(data.gdsPath);
+  renderViewerTabs();
+}
+
+// (Re)seed the mtime baseline for the GDS the viewer is showing, without
+// reloading. Called after every load (button compile, LLM reloadGds, terminal
+// poll) so the mtime-poller doesn't re-fire for the change that just produced
+// that load. Also the single place currentGdsPath is reconciled with the
+// actually-on-disk file.
+async function seedWatchedGds(gdsPath: string | null) {
+  if (!gdsPath) { watchedGds = null; return; }
+  currentGdsPath = gdsPath;
+  try {
+    const r = await fetch('/api/gds-stat?path=' + encodeURIComponent(gdsPath));
+    if (!r.ok) return;
+    const { exists, mtimeMs } = await r.json();
+    watchedGds = exists ? { path: gdsPath, mtime: mtimeMs } : null;
+  } catch { /* best-effort baseline */ }
+}
+
+// Re-parse a GDS from disk and load it into the viewer. The shared sink for the
+// two "build happened outside the Compile button" channels: the LLM run_script
+// channel (an explicit reloadGds command names the file just built) and the
+// terminal channel (the mtime poller saw the viewed file change). Mirrors
+// compile()'s 'complete' handler minus the terminal logging.
+async function loadGdsIntoViewer(gdsPath: string) {
+  if (!gdsPath) return;
+  // Tree paths are workspace-relative; /api/parse (and tab ids) want absolute.
+  const absPath = resolveWorkspacePath(gdsPath);
+  const pythonPath = editorEnvSelect?.value;
+  try {
+    const res = await fetch('/api/parse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gdsPath: absPath, pythonPath }),
+    });
+    if (!res.ok) return;
+    const { geojson, mode } = await res.json();
+    addViewerTab({ gdsPath: absPath, geojson, mode });
+    if (layoutMode === 'editor') setLayoutMode('split');
+  } catch (e) {
+    console.error('[loadGdsIntoViewer] failed', e);
+  } finally {
+    // Re-baseline so the poller doesn't immediately re-fire for this same load.
+    seedWatchedGds(absPath);
+  }
+}
+
+// Poll the viewed GDS's mtime so a build run in the terminal (or any external
+// edit) still refreshes the viewer. The server can't observe PTY output, so
+// file modification time is the only signal that a terminal-driven build
+// finished. Polling — not fs.watch — because the workspace lives on a Windows
+// NTFS drive mounted into WSL2, where inotify does not fire reliably; stat
+// polling always works.
+let lastMtimePoll = 0;
+function pollGdsMtime() {
+  const now = Date.now();
+  if (now - lastMtimePoll < 2000) return; // self-throttle to every 2s
+  lastMtimePoll = now;
+  const gdsPath = currentGdsPath;
+  if (!gdsPath) return;
+  fetch('/api/gds-stat?path=' + encodeURIComponent(gdsPath))
+    .then(res => res.ok ? res.json() : { exists: false, mtimeMs: 0 })
+    .then(({ exists, mtimeMs }: { exists: boolean; mtimeMs: number }) => {
+      if (!exists) return;
+      // Path changed (tab switch / first load) — seed baseline, don't fire.
+      if (!watchedGds || watchedGds.path !== gdsPath) {
+        watchedGds = { path: gdsPath, mtime: mtimeMs };
+        return;
+      }
+      if (mtimeMs > watchedGds.mtime) {
+        watchedGds.mtime = mtimeMs; // optimistic — prevent re-fire before the reload re-seeds
+        loadGdsIntoViewer(gdsPath);
+      }
+    })
+    .catch(() => {});
+}
+
+async function openFile(filePath: string) {
+  // Already open? Just activate that tab — don't reload or lose undo history.
+  const existing = editorTabs.find(t => t.path === filePath);
+  if (existing) {
+    activateEditorTab(filePath);
+    currentFile = filePath;
+    infoState.file = filePath;
+    renderInfoPanel();
+    pushOpenFileState(filePath);
+    return;
+  }
+  // Load content and create a dedicated Monaco model for this file.
   const res = await fetch(`/files/${filePath}`);
   if (!res.ok) {
     console.error('Failed to open file:', res.status);
@@ -823,20 +1089,42 @@ async function openFile(filePath: string) {
     return;
   }
   const { content } = await res.json();
-  editor.setValue(content);
+
+  const monacoObj = (window as any).monaco;
+  const uri = monacoObj.Uri.parse('file:///' + filePath.replace(/\\/g, '/'));
+  let model = monacoObj.editor.getModel(uri);
+  if (!model) model = monacoObj.editor.createModel(content || '', 'python', uri);
+  // Track dirty state from in-buffer edits; cleared again on save.
+  model.onDidChangeContent(() => {
+    const tab = editorTabs.find(t => t.path === filePath);
+    if (tab && !tab.dirty) { tab.dirty = true; renderEditorTabs(); }
+  });
+  editorTabs.push({ path: filePath, model, dirty: false });
+
+  currentFile = filePath;
+  infoState.file = filePath;
+  renderInfoPanel();
+  logEvent('system', 'Opened ' + filePath);
+  sessionStorage.setItem('supergds-current-file', filePath);
+  setStudioCookie('file', filePath);
+  if (workspacePath) sessionStorage.setItem('supergds-workspace', workspacePath);
+  activateEditorTab(filePath);
 
   // Track current file for jump-to-source
   (window as any).studio.currentFile = filePath;
+  pushOpenFileState(filePath);
 
-  // Push open file state to server for MCP server to read
+  if (editorCompileBtn) editorCompileBtn.disabled = false;
+  if (viewerCompileBtn) viewerCompileBtn.disabled = false;
+}
+
+// Push the open-file state to the server (for the MCP server / standalone pages).
+function pushOpenFileState(filePath: string) {
   fetch('/api/ide-state', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ type: 'openFile', file: filePath }),
   }).catch(() => {});
-
-  runBtn.disabled = false;
-  rebuildBtn.disabled = false;
 }
 
 async function findFileByBasename(basename: string): Promise<string | null> {
@@ -891,9 +1179,28 @@ async function openWorkspace(folderPath: string) {
   await loadFileTree();
 }
 
-async function loadPythonEnvironments() {
-  if (!pythonEnvSelect) return;
+// Populate the same <option> list into every env select — the editor and
+// viewer panes share one environment set.
+function renderEnvOptions(envs: Array<{ path: string; name: string; isActive?: boolean }>) {
+  for (const sel of envSelects) {
+    sel.innerHTML = '';
+    if (envs.length === 0) {
+      sel.innerHTML = '<option value="">No env found — using default</option>';
+      continue;
+    }
+    for (const env of envs) {
+      const option = document.createElement('option');
+      option.value = env.path;
+      option.textContent = env.name;
+      option.title = env.path;
+      if (env.isActive) option.selected = true;
+      sel.appendChild(option);
+    }
+  }
+}
 
+async function loadPythonEnvironments() {
+  if (envSelects.length === 0) return;
   try {
     // Timeout after 10s — conda env list can hang on WSL
     const controller = new AbortController();
@@ -904,57 +1211,43 @@ async function loadPythonEnvironments() {
 
     if (!res.ok) {
       console.error('Failed to load Python environments:', res.status);
-      pythonEnvSelect.innerHTML = '<option value="">Python (default)</option>';
+      for (const sel of envSelects) sel.innerHTML = '<option value="">Python (default)</option>';
       return;
     }
 
     const { environments } = await res.json();
-
-    // Clear and populate the dropdown
-    pythonEnvSelect.innerHTML = '';
-    if (environments.length === 0) {
-      pythonEnvSelect.innerHTML = '<option value="">No env found — using default</option>';
-      return;
-    }
-    for (const env of environments) {
-      const option = document.createElement('option');
-      option.value = env.path;
-      option.textContent = env.name;
-      option.title = env.path;
-      if (env.isActive) {
-        option.selected = true;
-      }
-      pythonEnvSelect.appendChild(option);
-    }
+    renderEnvOptions(environments);
   } catch (err: any) {
     console.error('Error loading Python environments:', err);
-    if (pythonEnvSelect) {
-      pythonEnvSelect.innerHTML = '<option value="">Python (default)</option>';
-    }
+    for (const sel of envSelects) sel.innerHTML = '<option value="">Python (default)</option>';
   }
 }
 
 // Load Python environments, restore the previously selected env from its
-// cookie, and persist any future selection change.
+// cookie, and keep both selects (editor + viewer) mirrored + persisted.
 async function initPythonEnv() {
   await loadPythonEnvironments();
-  if (!pythonEnvSelect) return;
 
   const saved = getStudioCookie('python-env');
   if (saved) {
-    for (const opt of Array.from(pythonEnvSelect.options)) {
-      if (opt.value === saved) {
-        pythonEnvSelect.value = saved;
-        break;
+    for (const sel of envSelects) {
+      for (const opt of Array.from(sel.options)) {
+        if (opt.value === saved) { sel.value = saved; break; }
       }
     }
   }
 
-  pythonEnvSelect.addEventListener('change', () => {
-    if (pythonEnvSelect.value) {
-      setStudioCookie('python-env', pythonEnvSelect.value);
-    }
-  });
+  for (const sel of envSelects) {
+    sel.addEventListener('change', () => {
+      if (sel.value) setStudioCookie('python-env', sel.value);
+      // Mirror the selection into the other select so both panes agree.
+      for (const other of envSelects) {
+        if (other !== sel) other.value = sel.value;
+      }
+      renderInfoPanel();
+      logEvent('system', `Python env → ${sel.selectedOptions[0]?.textContent?.trim() || sel.value || 'default'}`);
+    });
+  }
 }
 
 async function loadFileTree() {
@@ -980,10 +1273,11 @@ async function loadFileTree() {
     return;
   }
 
-  // Filter to show Python files and common project files
+  // Filter to show Python files, common project files, and built layouts.
   const displayFiles = files.filter((f: string) => {
     const ext = f.split('.').pop()?.toLowerCase();
-    return ['py', 'json', 'ts', 'js', 'md', 'txt', 'yaml', 'yml', 'toml', 'cfg', 'ini'].includes(ext || '');
+    return ['py', 'json', 'ts', 'js', 'md', 'txt', 'yaml', 'yml', 'toml', 'cfg', 'ini'].includes(ext || '')
+      || isLayoutFile(f);
   });
 
   const tree = buildFileTree(displayFiles);
@@ -1020,22 +1314,26 @@ function expandFolderPath(path: string): void {
 
 async function saveCurrentFile() {
   if (!currentFile) return;
-  const content = editor.getValue();
+  const tab = editorTabs.find(t => t.path === currentFile);
+  const content = tab ? tab.model.getValue() : editor.getValue();
   await fetch(`/files/${currentFile}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content }),
   });
+  if (tab) { tab.dirty = false; renderEditorTabs(); }
 }
 
-async function handleRun() {
+async function compile() {
   if (!currentFile) return;
   await saveCurrentFile();
   terminal.clear();
-  const pythonPath = pythonEnvSelect?.value;
+  const pythonPath = editorEnvSelect?.value;
   const pythonPathParam = pythonPath ? `&pythonPath=${encodeURIComponent(pythonPath)}` : '';
-  const envLabel = pythonEnvSelect?.selectedOptions[0]?.textContent?.trim() || 'default';
+  const envLabel = editorEnvSelect?.selectedOptions[0]?.textContent?.trim() || 'default';
   terminal.addLine('system', `$ python (${envLabel}) ${currentFile}`);
+  setInfoStatus('building…', '—', null);
+  logEvent('system', `Compile: ${currentFile} (${envLabel})`);
 
   let completed = false;
   const es = new EventSource(`/api/run?pythonFile=${encodeURIComponent(currentFile)}${pythonPathParam}`);
@@ -1045,7 +1343,13 @@ async function handleRun() {
   es.addEventListener('complete', (e: MessageEvent) => {
     completed = true;
     const data = JSON.parse(e.data);
-    bridge.sendLoadGds(data);
+    // Add (or refresh) a GDS result tab for this build and show it; pop the
+    // viewer pane out if we're in editor-only so the result is immediately visible.
+    addViewerTab(data);
+    // Baseline the just-written file so the mtime poller doesn't immediately
+    // re-fire a redundant reload for this same (button-driven) build.
+    seedWatchedGds(data.gdsPath || null);
+    if (layoutMode === 'editor') setLayoutMode('split');
     // Extract source locations from geojson and display in terminal
     const geojson = data.geojson as { features?: Array<{ properties?: { provenance?: { file?: string; line?: number | string } } }> };
     if (geojson?.features) {
@@ -1083,6 +1387,9 @@ async function handleRun() {
       }
     }
     terminal.addLine('system', 'Done.');
+    const gdsName = data.gdsPath ? String(data.gdsPath).split(/[/\\]/).pop()! : null;
+    setInfoStatus('OK', gdsName || '—', geojson?.features?.length ?? null);
+    logEvent('stdout', `Build OK — ${gdsName || 'no GDS'} (${geojson?.features?.length ?? 0} features)`);
     es.close();
     // Push build status to server state for MCP server to read
     fetch('/api/ide-state', {
@@ -1112,6 +1419,8 @@ async function handleRun() {
     } else {
       terminal.addLine('stderr', 'Run failed — connection lost.');
     }
+    setInfoStatus('failed', '—', null);
+    logEvent('stderr', 'Build failed');
     es.close();
     // Push build error status to server state
     fetch('/api/ide-state', {
@@ -1131,78 +1440,16 @@ async function handleRun() {
   });
 }
 
-async function handleRebuild() {
-  await handleRun();
-}
+// ---- xterm.js terminal (multi-terminal panel) ----
 
-// ---- xterm.js terminal ----
-
-function initXterm(): void {
+function initTermPanel(): void {
   const container = document.getElementById('terminal-xterm');
   if (!container) return;
-
-  // xterm.js is bundled locally via esbuild (no CDN dependency)
-  xterm = new Terminal({
-    cursorBlink: true,
-    fontSize: 13,
-    fontFamily: "'Cascadia Code', 'Fira Code', monospace",
-    theme: {
-      background: '#11111b',
-      foreground: '#cdd6f4',
-      cursor: '#89b4fa',
-      selectionBackground: '#45475a',
-    },
-  });
-
-  xtermFitAddon = new FitAddon();
-  xterm.loadAddon(xtermFitAddon);
-  xterm.open(container);
-
-  // Fit after a short delay to ensure container has dimensions
-  setTimeout(() => {
-    try { xtermFitAddon.fit(); } catch {}
-  }, 100);
-
-  connectTerminalWs();
-}
-
-function connectTerminalWs(): void {
-  if (!xterm) return;
-
-  const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  xtermWs = new WebSocket(`${wsProtocol}//${location.host}/api/terminal`);
-
-  xterm?.write('\x1b[90mConnecting...\x1b[0m\r');
-
-  xtermWs.onopen = () => {
-    // Clear the "Connecting..." message and send initial size
-    xterm?.write('\r\x1b[K');
-    if (xtermFitAddon && xterm) {
-      const dims = xtermFitAddon.proposeDimensions();
-      if (dims) {
-        xtermWs?.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
-      }
-    }
-  };
-
-  xtermWs.onmessage = (ev) => {
-    xterm?.write(ev.data);
-  };
-
-  xtermWs.onclose = () => {
-    xterm?.write('\r\n\x1b[90m— connection lost, reopen tab to reconnect —\x1b[0m\r\n');
-  };
-
-  xtermWs.onerror = () => {
-    xterm?.write('\r\n\x1b[31mTerminal connection error\x1b[0m\r\n');
-  };
-
-  // User input → WebSocket
-  xterm.onData((data: string) => {
-    if (xtermWs?.readyState === WebSocket.OPEN) {
-      xtermWs.send(data);
-    }
-  });
+  // Terminal + FitAddon bundle into this chunk; TermPanel is a sibling chunk
+  // exposed on window.TermPanel (loaded before studio.js). esbuild's IIFE
+  // multi-entry build can't wire a value import from a sibling entry — it
+  // emits `void 0` — so reach it via window like every other cross-chunk class.
+  termPanel = new window.TermPanel(container, { Terminal, FitAddon });
 }
 
 function setupBottomPanel(): void {
@@ -1226,17 +1473,8 @@ function setupBottomPanel(): void {
     active: true,
     onActivate: () => {
       activeTerminalTab = 'terminal';
-      if (xtermFitAddon && xterm) {
-        setTimeout(() => {
-          try {
-            xtermFitAddon.fit();
-            const dims = xtermFitAddon.proposeDimensions();
-            if (dims && xtermWs?.readyState === WebSocket.OPEN) {
-              xtermWs.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
-            }
-          } catch {}
-        }, 50);
-      }
+      // Refit the active terminal now that its panel is visible again
+      setTimeout(() => termPanel?.fitActive(), 50);
     },
   });
 
@@ -1248,6 +1486,18 @@ function setupBottomPanel(): void {
   // Problems tab — placeholder for future diagnostics
   tabManager.addTab('problems', 'Problems', problemsPanel, {
     onActivate: () => { activeTerminalTab = 'problems'; },
+  });
+
+  // Info tab — live IDE/build status (file, env, last build result).
+  const infoPanel = document.getElementById('terminal-info')!;
+  tabManager.addTab('info', 'Info', infoPanel, {
+    onActivate: () => { activeTerminalTab = 'info'; },
+  });
+
+  // Log tab — timestamped event feed (compiles, opens, errors).
+  const logPanel = document.getElementById('terminal-log')!;
+  tabManager.addTab('log', 'Log', logPanel, {
+    onActivate: () => { activeTerminalTab = 'log'; },
   });
 
   // === Available tabs (shown in "+" dropdown) ===
@@ -1271,12 +1521,81 @@ function setupBottomPanel(): void {
     return { el: panel };
   }, '📋');
 
-  // Reconnect terminal when the xterm panel becomes visible
-  new MutationObserver(() => {
-    if (xtermPanel.style.display !== 'none' && xtermWs?.readyState !== WebSocket.OPEN) {
-      connectTerminalWs();
-    }
-  }).observe(xtermPanel, { attributes: true, attributeFilter: ['style'] });
+  // Help tab — keyboard shortcuts reference (mirrors the viewer's Help tab).
+  tabManager.addAvailableTab('help', 'Help', () => {
+    const panel = document.createElement('div');
+    panel.className = 'terminal-tab-panel';
+    panel.style.cssText = 'padding:12px 16px;font:12px/1.6 \'Cascadia Code\',\'Fira Code\',monospace;color:#cdd6f4;overflow-y:auto;';
+    panel.innerHTML = [
+      '<div style="color:#89b4fa;font-weight:600;font-size:13px;margin-bottom:8px;">Keyboard Shortcuts</div>',
+      '<div style="display:grid;grid-template-columns:120px 1fr;gap:4px 12px;">',
+      '<span style="color:#f9e2af;">Ctrl+S</span><span>Save current file</span>',
+      '<span style="color:#f9e2af;">Ctrl+Enter</span><span>Compile (run the active script)</span>',
+      '<span style="color:#f9e2af;">Ctrl+\\</span><span>Toggle the viewer pane</span>',
+      '<span style="color:#f9e2af;">⧉</span><span>Open a pane in a new window</span>',
+      '</div>',
+    ].join('\n');
+    return { el: panel };
+  }, '❓');
+
+  // Seed the Info + Log panels with placeholders and render an initial Info row.
+  initInfoLogPanels();
+  renderInfoPanel();
+}
+
+// ---- Info + Log tabs (main IDE bottom panel) ----
+// Info shows live IDE/build status; Log is an append-only timestamped event
+// feed. Both write directly to their panel elements regardless of which tab is
+// active, so events are captured even when the user isn't viewing them.
+let infoState: { file?: string; status?: string; gds?: string; components?: number | null } = {};
+
+function renderInfoPanel(): void {
+  const panel = document.getElementById('terminal-info');
+  if (!panel) return;
+  const envLabel = editorEnvSelect?.selectedOptions[0]?.textContent?.trim() || 'default';
+  const rows: Array<[string, string, boolean?]> = [
+    ['File', infoState.file || '—'],
+    ['Env', envLabel],
+    ['Status', infoState.status || 'idle', infoState.status === 'OK'],
+    ['GDS', infoState.gds || '—'],
+    ['Components', infoState.components != null ? String(infoState.components) : '—'],
+  ];
+  panel.innerHTML = rows
+    .map(([k, v, hl]) => `<div class="kv"><span class="key">${k}</span><span class="val${hl ? ' hl' : ''}">${escapeHtml(v)}</span></div>`)
+    .join('');
+}
+
+function setInfoStatus(status: string, gds?: string, components?: number | null): void {
+  infoState.status = status;
+  if (gds !== undefined) infoState.gds = gds;
+  if (components !== undefined) infoState.components = components;
+  renderInfoPanel();
+}
+
+function logEvent(level: 'system' | 'stdout' | 'stderr', msg: string): void {
+  const panel = document.getElementById('terminal-log');
+  if (!panel) return;
+  const ph = panel.querySelector('.placeholder');
+  if (ph) panel.innerHTML = '';
+  const line = document.createElement('div');
+  line.className = level; // .system / .stdout / .stderr are styled in studio.css
+  const ts = new Date().toLocaleTimeString();
+  line.innerHTML = `<span class="timestamp">[${ts}]</span> ${escapeHtml(msg)}`;
+  panel.appendChild(line);
+  panel.scrollTop = panel.scrollHeight;
+}
+
+function initInfoLogPanels(): void {
+  const info = document.getElementById('terminal-info');
+  const log = document.getElementById('terminal-log');
+  if (info) info.innerHTML = '<p class="placeholder">Build status will appear here</p>';
+  if (log) {
+    // Styling lives in studio.css (#terminal-log). Do NOT set log.style.cssText
+    // here — cssText replaces ALL inline styles, which would wipe the
+    // display:none that TabManager sets when this tab is inactive, causing the
+    // Log panel to render stacked under the Terminal panel.
+    log.innerHTML = '<p class="placeholder">Events will appear here</p>';
+  }
 }
 
 // Poll for pending commands from MCP server (highlight source, select by source)
@@ -1289,14 +1608,19 @@ function pollMcpCommands() {
 
   fetch('/api/ide-state/commands')
     .then(res => res.ok ? res.json() : { commands: [] })
-    .then(({ commands }: { commands: Array<{ type: string; file: string; line: number }> }) => {
+    .then(({ commands }: { commands: Array<{ type: string; file?: string; line?: number; gdsPath?: string }> }) => {
       for (const cmd of commands) {
         if (cmd.type === 'highlightSource') {
           // Highlight source line in Monaco
-          jumpToLine(cmd.line);
+          jumpToLine(cmd.line!);
         } else if (cmd.type === 'selectBySource') {
           // Select polygons in viewer corresponding to source location
-          bridge?.sendSelectBySource(cmd.file, cmd.line);
+          bridge?.sendSelectBySource(cmd.file!, cmd.line!);
+        } else if (cmd.type === 'reloadGds' && cmd.gdsPath) {
+          // LLM run_script built a GDS — reload it into the viewer (the LLM
+          // build channel; run_script consumes the /api/run SSE itself, so
+          // compile() never sees it).
+          loadGdsIntoViewer(cmd.gdsPath);
         }
       }
     })
@@ -1312,9 +1636,9 @@ function toggleTerminal(): void {
   // Hide the drag-resize handle while collapsed (nothing to resize)
   const handle = document.getElementById('terminal-resize-handle');
   if (handle) handle.style.display = collapsed ? 'none' : '';
-  // Refit xterm to the restored height when expanding
-  if (!collapsed && xtermFitAddon && xterm) {
-    setTimeout(() => { try { xtermFitAddon.fit(); } catch {} }, 50);
+  // Refit the active terminal to the restored height when expanding
+  if (!collapsed) {
+    setTimeout(() => termPanel?.fitActive(), 50);
   }
 }
 
@@ -1326,17 +1650,26 @@ export function init() {
   // @ts-ignore
   bridge = new (window as any).IframeBridge(iframeViewer);
 
-  // Initialize xterm.js terminal (non-fatal — app works without it)
-  try { initXterm(); } catch (e) { console.error('xterm init failed:', e); }
+  // Initialize the multi-terminal panel (non-fatal — app works without it)
+  try { initTermPanel(); } catch (e) { console.error('terminal panel init failed:', e); }
   setupBottomPanel();
 
   // Setup UI
   setupMenuBar();
   setupSidebar();
 
-  // Event listeners
-  runBtn.addEventListener('click', handleRun);
-  rebuildBtn.addEventListener('click', handleRebuild);
+  // Event listeners — per-group Compile + popout buttons
+  editorCompileBtn?.addEventListener('click', compile);
+  viewerCompileBtn?.addEventListener('click', compile);
+  editorPopoutBtn?.addEventListener('click', () => {
+    // The standalone editor page. ?file= is a fallback used only until the
+    // popupReady handshake delivers the full open-tabs state.
+    const f = currentFile ? encodeURIComponent(currentFile) : '';
+    window.open('/editor/editor.html' + (f ? '?file=' + f : ''), '_blank');
+  });
+  viewerPopoutBtn?.addEventListener('click', () => {
+    window.open('/viewer/viewer.html?popout=1', '_blank');
+  });
 
   // Expose studio for debugging
   (window as any).studio = { editor, bridge, terminal, currentFile: null, openFile, jumpToLine };
@@ -1349,32 +1682,17 @@ export function init() {
 
   // Start polling for MCP commands (highlight, select) from Claude Code
   setInterval(pollMcpCommands, 1000);
+  // Watch the viewed GDS's mtime so terminal / external builds refresh the viewer.
+  setInterval(pollGdsMtime, 1000);
 
   // Restore layout mode from sessionStorage
   const savedLayout = sessionStorage.getItem('supergds-layout') as LayoutMode | null;
   setLayoutMode(savedLayout || 'split');
 
-  // Layout mode menu
-  if (layoutBtn) {
-    layoutBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      layoutMenu?.classList.toggle('hidden');
-    });
-  }
-
-  document.addEventListener('click', () => {
-    layoutMenu.classList.add('hidden');
-  });
-
-  if (layoutMenu) {
-    layoutMenu.querySelectorAll('.layout-option').forEach(el => {
-      el.addEventListener('click', () => {
-        const mode = el.getAttribute('data-mode') as LayoutMode;
-        setLayoutMode(mode);
-        layoutMenu.classList.add('hidden');
-      });
-    });
-  }
+  // Render the (initially empty) editor + viewer tab bars so the placeholder
+  // hints show before any file is opened / GDS is built.
+  renderEditorTabs();
+  renderViewerTabs();
 
   // Overleaf-style collapse arrow — toggles between split and editor-only
   if (collapseToggle) {
@@ -1393,23 +1711,6 @@ export function init() {
     terminalCollapse.addEventListener('click', () => toggleTerminal());
   }
 
-  // Viewer tab × button — closes viewer (switch to editor-only)
-  if (viewerTabClose) {
-    viewerTabClose.addEventListener('click', (e) => {
-      e.stopPropagation();
-      setLayoutMode('editor');
-    });
-  }
-
-  // Open Viewer in New Tab
-  const openNewTabOption = document.getElementById('open-viewer-new-tab');
-  if (openNewTabOption) {
-    openNewTabOption.addEventListener('click', () => {
-      window.open('/viewer/viewer.html', '_blank');
-      layoutMenu?.classList.add('hidden');
-    });
-  }
-
   // Keyboard shortcuts — Ctrl+\ (toggle), Ctrl+← (editor), Ctrl+→ (viewer), Ctrl+↓ (split)
   document.addEventListener('keydown', (e) => {
     if (!e.ctrlKey) return;
@@ -1426,6 +1727,42 @@ export function init() {
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
       setLayoutMode('split');
+    }
+  });
+
+  // Listen for messages from popped-out standalone windows (editor.html /
+  // viewer.html opened via a pane's ⧉ button). popupReady is the handshake by
+  // which a freshly-opened popout asks for the current state (so it doesn't
+  // have to recompile / reopen files from scratch); dockBack returns the window
+  // to the main split; standaloneResult mirrors a compile run made standalone.
+  window.addEventListener('message', (e: MessageEvent) => {
+    const msg = (e.data || {}) as { type?: string; pane?: string; data?: any };
+    if (msg.type === 'popupReady') {
+      const payload: any = { type: 'popupState', pane: msg.pane };
+      if (msg.pane === 'editor') {
+        payload.editorState = {
+          openTabs: editorTabs.map(t => ({ path: t.path, content: t.model.getValue(), dirty: t.dirty })),
+          activePath: activeEditorPath,
+          env: editorEnvSelect?.value || '',
+        };
+      } else {
+        payload.viewerState = {
+          tabs: viewerTabs.map(t => ({ id: t.id, label: t.label, data: t.data })),
+          activeId: activeViewerId,
+          env: viewerEnvSelect?.value || '',
+        };
+      }
+      (e.source as Window | null)?.postMessage(payload, '*');
+      return;
+    }
+    if (msg.type === 'dockBack') {
+      setLayoutMode('split');
+      // Pick up any edits the user made in the standalone editor window.
+      if (msg.pane === 'editor' && currentFile) openFile(currentFile);
+    } else if (msg.type === 'standaloneResult' && msg.data) {
+      // A compile run in a standalone editor produced a GDS — mirror it here.
+      addViewerTab(msg.data);
+      if (layoutMode === 'editor') setLayoutMode('split');
     }
   });
 

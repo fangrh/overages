@@ -82,56 +82,38 @@
 <div id="main-column">
   <!-- Main Content (Editor + Viewer + Terminal) -->
   <div id="main-content">
-    <!-- Toolbar -->
-    <div id="toolbar">
-      <span id="current-file" class="current-file-label">No file open</span>
-      <div style="flex: 1;"></div>
-      <select id="python-env-select" title="Python Environment">
-        <option value="">Detecting environments...</option>
-      </select>
-      <div id="layout-group">
-        <button id="btn-layout" class="layout-btn" title="Layout">
-          <span id="layout-icon">⬚</span>
-        </button>
-        <div id="layout-menu" class="layout-menu hidden">
-          <div class="layout-menu-header">Layout Options</div>
-          <div class="layout-option" data-mode="split">
-            <span class="layout-icon-text">◫</span> Split View
-          </div>
-          <div class="layout-option" data-mode="editor">
-            <span class="layout-icon-text">◧</span> Editor Only
-          </div>
-          <div class="layout-option" data-mode="viewer">
-            <span class="layout-icon-text">◨</span> Viewer Only
-          </div>
-          <div class="layout-menu-divider"></div>
-          <div class="layout-option" id="open-viewer-new-tab">
-            <span class="layout-icon-text">⧉</span> Open Viewer in New Tab
-          </div>
-        </div>
-      </div>
-      <button id="run-btn" disabled>▶ Run</button>
-      <button id="rebuild-btn" disabled>⟳ Rebuild</button>
-    </div>
-
-    <!-- Tab bar (Overleaf-style) -->
-    <div id="tab-bar">
-      <div id="editor-tab" class="tab active">
-        <span class="tab-label">Editor</span>
-      </div>
-      <div id="viewer-tab" class="tab active">
-        <span class="tab-label">GDS</span>
-        <button class="tab-close" id="viewer-tab-close" title="Close Viewer">×</button>
-      </div>
-    </div>
-
-    <!-- Panels: Editor + Viewer -->
+    <!-- Panels: Editor group | Viewer group (VS Code split).
+         Each group's action toolbar (Compile / env / popout) sits ONE LEVEL
+         ABOVE its tab strip — the action buttons belong to the whole pane, not
+         to an individual file/result tab. Tab bars are populated by JS. -->
     <div id="panels">
+      <!-- Editor group -->
       <div id="editor-pane">
+        <div class="group-header" id="editor-group-header">
+          <span class="group-title">Editor</span>
+          <div style="flex:1;"></div>
+          <button class="group-btn compile-btn" id="editor-compile-btn" disabled title="Compile (run the active script)">▶ Compile</button>
+          <select class="group-env-select" id="editor-env-select" title="Python Environment">
+            <option value="">Detecting…</option>
+          </select>
+          <button class="group-btn popout-btn" id="editor-popout-btn" title="Open editor in new window">⧉</button>
+        </div>
+        <div class="group-tab-bar" id="editor-group-tabs"><!-- editor file tabs injected by JS --></div>
         <div id="monaco-editor"></div>
       </div>
       <div id="resize-handle" class="resize-handle"></div>
+      <!-- Viewer group -->
       <div id="viewer-pane">
+        <div class="group-header" id="viewer-group-header">
+          <span class="group-title">GDS Viewer</span>
+          <div style="flex:1;"></div>
+          <button class="group-btn compile-btn" id="viewer-compile-btn" disabled title="Compile (run the active script)">▶ Compile</button>
+          <select class="group-env-select" id="viewer-env-select" title="Python Environment">
+            <option value="">Detecting…</option>
+          </select>
+          <button class="group-btn popout-btn" id="viewer-popout-btn" title="Open viewer in new window">⧉</button>
+        </div>
+        <div class="group-tab-bar" id="viewer-group-tabs"><!-- GDS result tabs injected by JS --></div>
         <!-- Overleaf-style collapse toggle -->
         <div id="viewer-collapse-toggle" class="collapse-toggle collapse-toggle-left" title="Hide Viewer (Ctrl+\)">
           <span>◀</span>
@@ -154,6 +136,8 @@
         <div id="terminal-xterm" class="terminal-tab-panel"></div>
         <div id="terminal-output" class="terminal-tab-panel"></div>
         <div id="terminal-problems" class="terminal-tab-panel"></div>
+        <div id="terminal-info" class="terminal-tab-panel"></div>
+        <div id="terminal-log" class="terminal-tab-panel"></div>
       </div>
     </div>
   </div>
@@ -182,9 +166,14 @@
             var s3 = document.createElement('script');
             s3.src = '/iframeBridge.js';
             s3.onload = function() {
-              var s4 = document.createElement('script');
-              s4.src = '/studio.js';
-              document.body.appendChild(s4);
+              var sTP = document.createElement('script');
+              sTP.src = '/termPanel.js';
+              sTP.onload = function() {
+                var s4 = document.createElement('script');
+                s4.src = '/studio.js';
+                document.body.appendChild(s4);
+              };
+              document.body.appendChild(sTP);
             };
             document.body.appendChild(s3);
           };

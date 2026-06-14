@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>overGDS — Editor</title>
+<link rel="stylesheet" href="/studio.css">
+<style>
+  html, body { height: 100%; margin: 0; background: #1e1e2e; color: #cdd6f4; overflow: hidden; }
+  body { display: flex; flex-direction: column; }
+  /* Top action bar sits ABOVE the file-tab strip (one level higher), matching
+     the main IDE's group layout. */
+  #sa-toolbar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 12px; background: #181825; border-bottom: 1px solid #313244;
+    flex-shrink: 0;
+  }
+  #sa-tabs { background: #181825; }
+  #monaco-editor { flex: 1; min-height: 0; }
+  #sa-terminal {
+    height: 170px; flex-shrink: 0; background: #11111b; color: #cdd6f4;
+    font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace; font-size: 12px;
+    padding: 8px 12px; overflow-y: auto; border-top: 1px solid #313244; white-space: pre-wrap;
+  }
+  .term-line { margin: 0; }
+  .term-stderr { color: #f38ba8; }
+  .term-system { color: #89b4fa; }
+  #dock-back-btn:not(:disabled) {
+    background: rgba(137, 180, 250, 0.12);
+    border-color: rgba(137, 180, 250, 0.35);
+    color: #89b4fa;
+  }
+  #dock-back-btn:not(:disabled):hover {
+    background: rgba(137, 180, 250, 0.22);
+    border-color: rgba(137, 180, 250, 0.55);
+  }
+  /* File picker panel for the Open… button */
+  #open-panel {
+    position: absolute; top: 38px; left: 110px; z-index: 400;
+    width: 360px; max-height: 320px; overflow-y: auto;
+    background: #1e1e2e; border: 1px solid #585b70; border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4); padding: 6px;
+  }
+  #open-panel.hidden { display: none; }
+  #open-panel .op-item {
+    padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 12px;
+    color: #cdd6f4; word-break: break-all;
+  }
+  #open-panel .op-item:hover { background: #313244; }
+  #open-panel .op-empty { padding: 10px; color: #585b70; font-style: italic; font-size: 12px; }
+</style>
+</head>
+<body>
+  <div id="sa-toolbar">
+    <span class="group-title">Editor</span>
+    <button class="group-btn" id="open-btn" title="Open another file">Open…</button>
+    <div id="open-panel" class="hidden"></div>
+    <div style="flex:1"></div>
+    <button class="group-btn compile-btn" id="compile-btn" disabled title="Compile (run the active script)">▶ Compile</button>
+    <select class="group-env-select" id="env-select" title="Python Environment">
+      <option value="">Detecting…</option>
+    </select>
+    <button class="group-btn" id="dock-back-btn" title="Dock back into overGDS Studio">⤢ Dock Back</button>
+  </div>
+  <div class="group-tab-bar" id="sa-tabs"><!-- file tabs injected by JS --></div>
+  <div id="monaco-editor"></div>
+  <div id="sa-terminal"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.55.1/min/vs/loader.js"></script>
+  <script>
+  (function () {
+    var COOKIE_PREFIX = 'studio-';
+    var COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
+    var editor = null;
+    // Multi-file tabs: one Monaco model per open file.
+    var tabs = [];        // [{ path, model, dirty }]
+    var activePath = null;
+
+    function getCookie(name) {
+      var key = COOKIE_PREFIX + name + '=';
+      var parts = document.cookie.split(';');
+      for (var i = 0; i < parts.length; i++) {
+        var t = parts[i].trim();
+        if (t.indexOf(key) === 0) return decodeURIComponent(t.slice(key.length));
+      }
+      return null;
+    }
+    function setCookie(name, value) {
+      document.cookie = COOKIE_PREFIX + name + '=' + encodeURIComponent(value) +
+        '; max-age=' + COOKIE_MAX_AGE + '; path=/; SameSite=Lax';
+    }
+    function basename(p) { return (p || '').replace(/\\/g, '/').split('/').pop() || (p || ''); }
+    function termLine(cls, text) {
+      var el = document.createElement('div');
+      el.className = 'term-line term-' + cls;
+      el.textContent = text;
+      var term = document.getElementById('sa-terminal');
+      term.appendChild(el);
+      term.scrollTop = 1e9;
+    }
+
+    // ----- File tab bar -----
+    function renderTabs() {
+      var bar = document.getElementById('sa-tabs');
+      bar.innerHTML = '';
+      if (tabs.length === 0) {
+        var hint = document.createElement('div');
+        hint.className = 'group-tab-empty';
+        hint.textContent = 'No file open — use Open…';
+        bar.appendChild(hint);
+        return;
+      }
+      tabs.forEach(function (tab) {
+        var el = document.createElement('div');
+        el.className = 'group-tab' + (tab.path === activePath ? ' active' : '') + (tab.dirty ? ' dirty' : '');
+        el.title = tab.path;
+        var label = document.createElement('span');
+        label.className = 'group-tab-label';
+        label.textContent = basename(tab.path);
+        el.appendChild(label);
+        var close = document.createElement('button');
+        close.className = 'tab-close';
+        close.title = 'Close'; close.textContent = '×';
+        close.addEventListener('click', function (e) { e.stopPropagation(); closeTab(tab.path); });
+        el.addEventListener('click', function () { activateTab(tab.path); });
+        el.appendChild(close);
+        bar.appendChild(el);
+      });
+    }
+    function activateTab(path) {
+      var tab = null;
+      for (var i = 0; i < tabs.length; i++) if (tabs[i].path === path) tab = tabs[i];
+      if (!tab) return;
+      activePath = path;
+      editor.setModel(tab.model);
+      document.getElementById('compile-btn').disabled = false;
+      renderTabs();
+    }
+    function closeTab(path) {
+      var idx = -1;
+      for (var i = 0; i < tabs.length; i++) if (tabs[i].path === path) idx = i;
+      if (idx < 0) return;
+      var tab = tabs[idx];
+      tabs.splice(idx, 1);
+      try { tab.model.dispose(); } catch (_) {}
+      if (activePath === path) {
+        var next = tabs[idx] || tabs[idx - 1] || null;
+        if (next) activateTab(next.path);
+        else { activePath = null; editor.setModel(null); document.getElementById('compile-btn').disabled = true; }
+      }
+      renderTabs();
+    }
+    // Open (or activate) a file, optionally with content already in hand so we
+    // don't re-fetch when the state was inherited from the opener.
+    async function openTab(path, content) {
+      for (var i = 0; i < tabs.length; i++) if (tabs[i].path === path) { activateTab(path); return; }
+      if (content === undefined) {
+        try {
+          var res = await fetch('/files/' + path);
+          if (!res.ok) { termLine('stderr', 'Failed to open ' + path + ' (' + res.status + ')'); return; }
+          var data = await res.json();
+          content = data.content || '';
+        } catch (e) { termLine('stderr', 'Error opening file: ' + e); return; }
+      }
+      var monacoObj = window.monaco;
+      var uri = monacoObj.Uri.parse('file:///' + path.replace(/\\/g, '/'));
+      var model = monacoObj.editor.getModel(uri);
+      if (!model) model = monacoObj.editor.createModel(content, 'python', uri);
+      var entry = { path: path, model: model, dirty: false };
+      model.onDidChangeContent(function () {
+        if (!entry.dirty) { entry.dirty = true; renderTabs(); }
+      });
+      tabs.push(entry);
+      activateTab(path);
+    }
+
+    // ----- Open… picker -----
+    function toggleOpenPanel() {
+      var panel = document.getElementById('open-panel');
+      if (!panel.classList.contains('hidden')) { panel.classList.add('hidden'); return; }
+      panel.classList.remove('hidden');
+      panel.innerHTML = '<div class="op-empty">Loading…</div>';
+      fetch('/api/files').then(function (r) { return r.ok ? r.json() : { files: [] }; })
+        .then(function (d) {
+          var files = (d.files || []).filter(function (f) { return /\.py$/i.test(f); });
+          panel.innerHTML = '';
+          if (files.length === 0) { panel.innerHTML = '<div class="op-empty">No .py files found</div>'; return; }
+          files.forEach(function (f) {
+            var item = document.createElement('div');
+            item.className = 'op-item'; item.textContent = f; item.title = f;
+            item.addEventListener('click', function () { openTab(f); panel.classList.add('hidden'); });
+            panel.appendChild(item);
+          });
+        }).catch(function () { panel.innerHTML = '<div class="op-empty">Could not list files</div>'; });
+    }
+    document.addEventListener('click', function (e) {
+      var panel = document.getElementById('open-panel');
+      var btn = document.getElementById('open-btn');
+      if (!panel.contains(e.target) && e.target !== btn) panel.classList.add('hidden');
+    });
+
+    async function saveFile() {
+      if (!activePath) return;
+      var tab = null;
+      for (var i = 0; i < tabs.length; i++) if (tabs[i].path === activePath) tab = tabs[i];
+      if (!tab) return;
+      await fetch('/files/' + activePath, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: tab.model.getValue() }),
+      });
+      tab.dirty = false;
+      renderTabs();
+    }
+
+    async function loadEnvs() {
+      var sel = document.getElementById('env-select');
+      try {
+        var res = await fetch('/api/python-environments');
+        if (!res.ok) { sel.innerHTML = '<option value="">Python (default)</option>'; return; }
+        var data = await res.json();
+        var envs = data.environments || [];
+        sel.innerHTML = '';
+        if (envs.length === 0) { sel.innerHTML = '<option value="">No env found — using default</option>'; return; }
+        envs.forEach(function (env) {
+          var o = document.createElement('option');
+          o.value = env.path; o.textContent = env.name; o.title = env.path;
+          if (env.isActive) o.selected = true;
+          sel.appendChild(o);
+        });
+        var saved = getCookie('python-env');
+        if (saved) sel.value = saved;
+      } catch (e) {
+        sel.innerHTML = '<option value="">Python (default)</option>';
+      }
+      sel.addEventListener('change', function () { if (sel.value) setCookie('python-env', sel.value); });
+    }
+
+    async function compile() {
+      if (!activePath) return;
+      var btn = document.getElementById('compile-btn');
+      btn.disabled = true;
+      await saveFile();
+      document.getElementById('sa-terminal').innerHTML = '';
+      var sel = document.getElementById('env-select');
+      var pythonPath = sel.value;
+      var envLabel = (sel.selectedIndex >= 0 && sel.options[sel.selectedIndex])
+        ? sel.options[sel.selectedIndex].textContent.trim() : 'default';
+      var param = pythonPath ? '&pythonPath=' + encodeURIComponent(pythonPath) : '';
+      termLine('system', '$ python (' + envLabel + ') ' + activePath);
+
+      var es = new EventSource('/api/run?pythonFile=' + encodeURIComponent(activePath) + param);
+      es.addEventListener('start', function (e) { try { termLine('stdout', JSON.parse(e.data).status); } catch (_) {} });
+      es.addEventListener('stdout', function (e) { try { termLine('stdout', JSON.parse(e.data).line); } catch (_) {} });
+      es.addEventListener('stderr', function (e) { try { termLine('stderr', JSON.parse(e.data).line); } catch (_) {} });
+      es.addEventListener('complete', function (e) {
+        var data = JSON.parse(e.data);
+        // Mirror the result into the main IDE's viewer (if this window was
+        // popped out of it) so the build shows up there too.
+        if (window.opener && !window.opener.closed) {
+          window.opener.postMessage({ type: 'standaloneResult', data: data }, '*');
+        }
+        var geojson = data.geojson;
+        if (geojson && geojson.features) {
+          var seen = {}, n = 0;
+          geojson.features.forEach(function (f) {
+            var prov = (f.properties || {}).provenance;
+            if (prov && prov.file && prov.line) {
+              var k = prov.file + ':' + prov.line;
+              if (!seen[k]) { seen[k] = 1; termLine('stdout', '  ' + prov.file + ':' + prov.line); n++; }
+            }
+          });
+          if (n) termLine('system', 'Provenance captured — ' + n + ' component(s).');
+          else if (data.mode !== 'full') termLine('stderr', '⚠ Provenance not captured for this build.');
+        }
+        termLine('system', 'Done. (Dock Back to view the GDS.)');
+        es.close();
+        btn.disabled = false;
+      });
+      es.addEventListener('error', function () {
+        termLine('stderr', 'Run failed — connection lost.');
+        es.close();
+        btn.disabled = false;
+      });
+    }
+
+    function dockBack() {
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage({ type: 'dockBack', pane: 'editor' }, '*');
+      }
+      window.close();
+    }
+
+    // Receive inherited state from the opener (popupReady handshake) so a popped
+    // out editor opens with the same files the main IDE had — no reopen needed.
+    window.addEventListener('message', function (e) {
+      var msg = e.data || {};
+      if (msg.type === 'popupState' && msg.pane === 'editor' && msg.editorState) {
+        var st = msg.editorState;
+        (st.openTabs || []).forEach(function (t) { openTab(t.path, t.content); });
+        var sel = document.getElementById('env-select');
+        if (st.env && sel) sel.value = st.env;
+        if (st.activePath) activateTab(st.activePath);
+      }
+    });
+
+    function init() {
+      renderTabs();
+      loadEnvs();
+      document.getElementById('compile-btn').addEventListener('click', compile);
+      document.getElementById('dock-back-btn').addEventListener('click', dockBack);
+      document.getElementById('open-btn').addEventListener('click', function (e) {
+        e.stopPropagation(); toggleOpenPanel();
+      });
+      document.addEventListener('keydown', function (e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveFile(); }
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); compile(); }
+      });
+      // Ask the opener for inherited state. If there is none (opened directly),
+      // fall back to the ?file= query param.
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage({ type: 'popupReady', pane: 'editor' }, '*');
+      }
+      var q = new URLSearchParams(location.search).get('file');
+      if (q) openTab(q);
+      else if (!window.opener) {
+        fetch('/api/ide-state').then(function (r) { return r.ok ? r.json() : {}; })
+          .then(function (s) { if (s.openFile) openTab(s.openFile); })
+          .catch(function () {});
+      }
+    }
+
+    // Load Monaco (CDN) → reuse the shared setup → boot.
+    require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.55.1/min/vs' } });
+    require(['vs/editor/editor.main'], function () {
+      window.monaco = monaco;
+      var s = document.createElement('script');
+      s.src = '/monacoSetup.js';
+      s.onload = function () {
+        editor = window.setupMonaco(document.getElementById('monaco-editor'));
+        init();
+      };
+      document.head.appendChild(s);
+    });
+  })();
+  </script>
+</body>
+</html>

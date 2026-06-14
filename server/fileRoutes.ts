@@ -31,6 +31,25 @@ export async function registerFileRoutes(app: FastifyInstance) {
     return { files };
   });
 
+  // Stat a single file's mtime. Used by the frontend's GDS-viewer auto-reload
+  // poller: when a build runs outside the Compile button (LLM run_script, or a
+  // command typed directly in the terminal), the only signal that the viewed
+  // .gds changed is its modification time on disk. We poll this cheaply instead
+  // of fs.watch because the workspace lives on a Windows (NTFS) drive mounted
+  // into WSL2, where inotify does not fire reliably — stat polling always works.
+  // Accepts an absolute path or a workspace-relative path.
+  app.get('/api/gds-stat', async (req) => {
+    const raw = ((req.query as { path?: string }).path ?? '').trim();
+    if (!raw) return { exists: false, mtimeMs: 0 };
+    const fullPath = path.isAbsolute(raw) ? raw : path.join(getWorkspacePath(), raw);
+    try {
+      const st = await fs.stat(fullPath);
+      return { exists: true, mtimeMs: st.mtimeMs, path: fullPath };
+    } catch {
+      return { exists: false, mtimeMs: 0 };
+    }
+  });
+
   // Return current workspace state so frontend can restore
   app.get('/api/workspace', async () => {
     try {

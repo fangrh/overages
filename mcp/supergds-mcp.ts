@@ -196,6 +196,14 @@ server.tool(
                 timestamp: Date.now(),
               },
             });
+            // Tell the frontend to reload the freshly-built GDS into the viewer.
+            // run_script consumes the /api/run SSE itself, so studio.ts never sees
+            // the 'complete' event — without this push the viewer would stay stale
+            // after an LLM-driven build. The frontend polls /api/ide-state/commands
+            // and calls loadGdsIntoViewer(gdsPath) when it sees this.
+            if (data.gdsPath) {
+              await postIdeState({ type: 'reloadGds', gdsPath: data.gdsPath });
+            }
           } else if (eventType === 'error') {
             result = `Build failed: ${data.message || 'unknown error'}`;
             await postIdeState({
