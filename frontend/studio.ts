@@ -281,6 +281,7 @@ const viewerCompileBtn = document.getElementById('viewer-compile-btn') as HTMLBu
 const editorEnvSelect = document.getElementById('editor-env-select') as HTMLSelectElement;
 const viewerEnvSelect = document.getElementById('viewer-env-select') as HTMLSelectElement;
 const editorPopoutBtn = document.getElementById('editor-popout-btn') as HTMLButtonElement;
+const editorShowViewerBtn = document.getElementById('editor-show-viewer-btn') as HTMLButtonElement;
 const viewerPopoutBtn = document.getElementById('viewer-popout-btn') as HTMLButtonElement;
 const editorTabsBar = document.getElementById('editor-group-tabs')!;
 const viewerTabsBar = document.getElementById('viewer-group-tabs')!;
@@ -1669,6 +1670,11 @@ export function init() {
   });
   viewerPopoutBtn?.addEventListener('click', () => {
     window.open('/viewer/viewer.html?popout=1', '_blank');
+  });
+  editorShowViewerBtn?.addEventListener('click', () => {
+    // Reveal the GDS viewer pane (editor-only → split). Counterpart to the
+    // viewer pane's ◀ collapse toggle.
+    setLayoutMode('split');
   });
 
   // Expose studio for debugging

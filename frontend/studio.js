@@ -9338,6 +9338,7 @@ ${h2.join(`
   var editorEnvSelect = document.getElementById("editor-env-select");
   var viewerEnvSelect = document.getElementById("viewer-env-select");
   var editorPopoutBtn = document.getElementById("editor-popout-btn");
+  var editorShowViewerBtn = document.getElementById("editor-show-viewer-btn");
   var viewerPopoutBtn = document.getElementById("viewer-popout-btn");
   var editorTabsBar = document.getElementById("editor-group-tabs");
   var viewerTabsBar = document.getElementById("viewer-group-tabs");
@@ -10452,6 +10453,9 @@ ${h2.join(`
     });
     viewerPopoutBtn?.addEventListener("click", () => {
       window.open("/viewer/viewer.html?popout=1", "_blank");
+    });
+    editorShowViewerBtn?.addEventListener("click", () => {
+      setLayoutMode("split");
     });
     window.studio = { editor, bridge, terminal, currentFile: null, openFile, jumpToLine };
     restoreWorkspace();
