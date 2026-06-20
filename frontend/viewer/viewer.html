@@ -9,6 +9,8 @@
 <script src="https://cdn.jsdelivr.net/npm/ol@10/dist/ol.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@6/lib/xterm.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.11/lib/addon-fit.js"></script>
+<script src="/viewer/editorLogic.js"></script>
+<script src="/viewer/overlayLogic.js"></script>
 <script src="/tabManager.js"></script>
 <script src="/termPanel.js"></script>
 <style>
@@ -83,12 +85,39 @@ body { display: flex; background: #1a1a2e; font-family: -apple-system, BlinkMacS
 .tool-btn:hover { background: #313244; color: #cdd6f4; }
 .tool-btn.active { background: #45475a; color: #89b4fa; border-color: #89b4fa; }
 .tool-btn svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-#mode-indicator { padding: 4px 8px; background: #1e1e2e; color: #a6e3a1; font-size: 11px; border-radius: 4px; border: 1px solid #313244; margin-bottom: 8px; text-align: center; }
-#mode-indicator.partial { border-color: #e17055; color: #e17055; }
-#zoom-controls { position: absolute; top: 8px; left: 8px; display: flex; flex-direction: column; gap: 2px; z-index: 100; }
+	#mode-indicator { padding: 4px 8px; background: #1e1e2e; color: #a6e3a1; font-size: 11px; border-radius: 4px; border: 1px solid #313244; margin-bottom: 8px; text-align: center; }
+	#mode-indicator.partial { border-color: #e17055; color: #e17055; }
+	#editor-status { position: absolute; right: 8px; bottom: 8px; z-index: 100; max-width: min(620px, calc(100% - 16px)); padding: 5px 8px; background: rgba(30,30,46,0.94); color: #cdd6f4; border: 1px solid #313244; border-radius: 4px; font-size: 12px; line-height: 1.35; pointer-events: none; }
+	#editor-status.warn { border-color: #f9e2af; color: #f9e2af; }
+	#editor-status.error { border-color: #f38ba8; color: #f38ba8; }
+	#zoom-controls { position: absolute; top: 8px; left: 8px; display: flex; flex-direction: column; gap: 2px; z-index: 100; }
 .zoom-btn { width: 32px; height: 32px; background: #1e1e2e; border: 1px solid #313244; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #6c7086; padding: 0; }
 .zoom-btn:hover { background: #313244; color: #cdd6f4; }
 .zoom-btn svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#overlay-rail { width: 340px; background: #181825; color: #cdd6f4; border-left: 1px solid #313244; display: flex; flex-direction: column; gap: 0; flex-shrink: 0; overflow-y: auto; }
+.overlay-band { padding: 10px 12px; border-bottom: 1px solid #313244; }
+.overlay-band h4 { margin: 0 0 8px 0; color: #89b4fa; font-size: 12px; line-height: 1.2; }
+.overlay-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 12px; }
+.overlay-value { color: #a6adc8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.overlay-action { min-height: 32px; padding: 0 10px; border: 1px solid #45475a; border-radius: 4px; background: #313244; color: #cdd6f4; font-size: 12px; cursor: pointer; }
+.overlay-action:hover { background: #45475a; }
+.overlay-action:disabled { opacity: 0.45; cursor: not-allowed; }
+#overlay-status { padding: 6px 8px; border: 1px solid #313244; border-radius: 4px; background: rgba(30,30,46,0.75); font-size: 12px; line-height: 1.35; }
+#overlay-status.high { border-color: #a6e3a1; color: #a6e3a1; }
+#overlay-status.medium { border-color: #f9e2af; color: #f9e2af; }
+#overlay-status.low, #overlay-status.stale { border-color: #f38ba8; color: #f38ba8; }
+#overlay-preview-wrap { position: relative; min-height: 96px; border: 1px solid #313244; border-radius: 4px; background: #11111b; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+#overlay-preview { max-width: 100%; max-height: 160px; display: none; cursor: crosshair; }
+#overlay-preview-empty { color: #585b70; font-size: 12px; padding: 28px 8px; text-align: center; }
+#overlay-file-input { width: 0.1px; height: 0.1px; opacity: 0; overflow: hidden; position: absolute; z-index: -1; }
+#overlay-opacity { width: 150px; accent-color: #89b4fa; }
+#overlay-pairs { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 11px; table-layout: fixed; }
+#overlay-pairs th, #overlay-pairs td { border-bottom: 1px solid #313244; padding: 4px 3px; text-align: right; color: #a6adc8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#overlay-pairs th:first-child, #overlay-pairs td:first-child { text-align: left; color: #6c7086; width: 28px; }
+#overlay-pending { color: #f9e2af; font-size: 12px; min-height: 16px; }
+@media (max-width: 1023px) {
+    #overlay-rail { width: 280px; }
+}
 /* Terminal host inside the console (Terminal tab) — TermPanel fills it */
 #viewer-term-panel { background: #11111b; }
 </style>
@@ -99,8 +128,9 @@ body { display: flex; background: #1a1a2e; font-family: -apple-system, BlinkMacS
 </div>
 <div id="map-container">
     <div id="map-row">
-        <div id="map" style="flex:1; position: relative;">
-            <div id="zoom-controls">
+	        <div id="map" style="flex:1; position: relative;">
+	            <div id="editor-status">Select: Shift-drag box selects, click replace</div>
+	            <div id="zoom-controls">
                 <button class="zoom-btn" title="Zoom in" onclick="zoomIn()">
                     <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                 </button>
@@ -136,6 +166,47 @@ body { display: flex; background: #1a1a2e; font-family: -apple-system, BlinkMacS
                 <svg viewBox="0 0 24 24"><path d="M6 16c0-3.3 2.7-6 6-6s6 2.7 6 6v3H6z"/><line x1="12" y1="3" x2="12" y2="7"/></svg>
             </button>
         </div>
+        <aside id="overlay-rail" aria-label="Microscopy overlay">
+            <div class="overlay-band">
+                <h4>Microscopy</h4>
+                <div id="overlay-status">No image</div>
+                <div class="overlay-row">
+                    <span class="overlay-value" id="overlay-file-name">No image</span>
+                    <label class="overlay-action" for="overlay-file-input">Insert Image</label>
+                    <input id="overlay-file-input" type="file" accept="image/*">
+                </div>
+            </div>
+            <div class="overlay-band">
+                <h4>Preview</h4>
+                <div id="overlay-preview-wrap">
+                    <div id="overlay-preview-empty">No image</div>
+                    <img id="overlay-preview" alt="Microscopy preview">
+                </div>
+                <div id="overlay-pending"></div>
+            </div>
+            <div class="overlay-band">
+                <h4>Correspondences</h4>
+                <div class="overlay-row">
+                    <select id="overlay-fit-type" class="overlay-action" aria-label="Fit type">
+                        <option value="affine">Affine</option>
+                        <option value="similarity">Similarity</option>
+                    </select>
+                    <button id="overlay-fit" class="overlay-action" type="button" disabled>Fit</button>
+                </div>
+                <table id="overlay-pairs" aria-label="Image and GDS point pairs">
+                    <thead><tr><th>#</th><th>image px</th><th>gds um</th></tr></thead>
+                    <tbody id="overlay-pair-body"></tbody>
+                </table>
+            </div>
+            <div class="overlay-band">
+                <h4>Overlay</h4>
+                <div class="overlay-row">
+                    <button id="overlay-visible" class="overlay-action" type="button" disabled>Show</button>
+                    <input id="overlay-opacity" type="range" min="0" max="1" step="0.01" value="0.5" disabled aria-label="Overlay opacity">
+                    <span class="overlay-value" id="overlay-opacity-value">50%</span>
+                </div>
+            </div>
+        </aside>
     </div>
     <div id="console-resizer" title="Drag to resize"></div>
     <div id="console">
@@ -192,8 +263,21 @@ var layerColors = {};
 var currentMode = 'select';
 var snapActive = false;
 var drawInteractions = {};
+var editorState = {
+    activeTool: 'select',
+    gestureState: 'idle',
+    selectionOp: 'replace',
+    boxSelectMode: 'off',
+    statusMessage: { level: 'info', text: 'Select: Shift-drag box selects, click replace' },
+    selectedCount: 0
+};
+var overlapClickState = ViewerEditorLogic.emptyClickCycleState();
 
 var drawSource = new ol.source.Vector();
+var activeOverlay = null;
+var overlayCorrespondences = [];
+var pendingOverlayImagePoint = null;
+var overlayImageLayer = null;
 
 var drawStyleDefault = new ol.style.Style({
     stroke: new ol.style.Stroke({ color: '#f38ba8', width: 2, lineDash: [8, 4] }),
@@ -215,11 +299,64 @@ var drawLayer = new ol.layer.Vector({
 // ============================================================
 // Keyboard handling
 // ============================================================
+function setEditorStatus(level, text) {
+    editorState.statusMessage = { level: level || 'info', text: text || '' };
+    var el = document.getElementById('editor-status');
+    if (!el) return;
+    el.textContent = editorState.statusMessage.text;
+    el.className = level && level !== 'info' ? level : '';
+}
+
+function updateEditorStatusFromState(level) {
+    setEditorStatus(level || 'info', ViewerEditorLogic.statusForEditorState(editorState));
+}
+
+function updateSelectionOpFromEvent(event) {
+    editorState.selectionOp = ViewerEditorLogic.selectionOpFromEvent(event || {});
+    updateEditorStatusFromState();
+}
+
+function resetSelectionCycleIndicator() {
+    rewriteLabels('');
+    selectionCycle = 0;
+    var cycleEl = document.getElementById('cycle-indicator');
+    if (cycleEl) { cycleEl.textContent = ''; cycleEl.style.display = 'none'; }
+}
+
+function resetOverlapClickCycle() {
+    overlapClickState = ViewerEditorLogic.emptyClickCycleState();
+}
+
+function abortActiveDrawing() {
+    if (editorState.gestureState !== 'drawing') return false;
+    var activeDraw = drawInteractions[editorState.activeTool];
+    if (!activeDraw) return false;
+    try {
+        if (typeof activeDraw.abortDrawing === 'function') {
+            activeDraw.abortDrawing();
+        } else {
+            activeDraw.setActive(false);
+            activeDraw.setActive(true);
+        }
+    } catch (err) {
+        console.error('superGDS: abort drawing failed', err);
+        setEditorStatus('error', 'Could not cancel current sketch');
+        return true;
+    }
+    editorState.gestureState = 'idle';
+    updateEditorStatusFromState();
+    return true;
+}
+
 document.addEventListener('keydown', function(e) {
     if (e.key === 'Control' || e.key === 'Meta') ctrlPressed = true;
+    updateSelectionOpFromEvent(e);
     if (e.key === 'Escape') {
-        if (currentMode !== 'select') {
+        e.preventDefault();
+        if (abortActiveDrawing()) return;
+        if (editorState.activeTool !== 'select') {
             setMode('select');
+            return;
         }
         clearSelection();
     }
@@ -242,6 +379,7 @@ document.addEventListener('keydown', function(e) {
 });
 document.addEventListener('keyup', function(e) {
     if (e.key === 'Control' || e.key === 'Meta') ctrlPressed = false;
+    updateSelectionOpFromEvent(e);
 });
 
 // ============================================================
@@ -277,9 +415,43 @@ function replaceSelection(features) {
 function clearSelection() {
     selectedFeatures.forEach(function(f) { f.set('selected', false); });
     selectedFeatures.clear();
+    editorState.selectedCount = 0;
+    resetOverlapClickCycle();
     vectorLayer.changed();
     drawLayer.changed();
     onSelectionChanged();
+    updateEditorStatusFromState();
+}
+
+function setSelectionToFeatures(features) {
+    selectedFeatures.forEach(function(f) { f.set('selected', false); });
+    selectedFeatures.clear();
+    features.forEach(function(f) {
+        selectedFeatures.push(f);
+        f.set('selected', true);
+    });
+}
+
+function applyFeatureSelection(features, op, options) {
+    var incoming = features || [];
+    var operation = op || 'replace';
+    var next = ViewerEditorLogic.applySelectionOperation(
+        selectedFeatures.getArray(),
+        incoming,
+        operation
+    );
+    setSelectionToFeatures(next);
+    if (!options || !options.preserveCycle) {
+        resetSelectionCycleIndicator();
+    }
+    if (!options || !options.preserveClickCycle) {
+        resetOverlapClickCycle();
+    }
+    editorState.selectedCount = selectedFeatures.getLength();
+    vectorLayer.changed();
+    drawLayer.changed();
+    onSelectionChanged(options || {});
+    updateEditorStatusFromState();
 }
 
 // Progressive Ctrl+A selection (narrow → broad):
@@ -415,10 +587,35 @@ function handleCtrlA() {
 
 // Select all features matching a given file and line (used by source panel clicks
 // and by the selectBySource postMessage handler).
-function _selectFeaturesBySource(targetFile, targetLine) {
+function postSourceSelectionResult(result) {
+    var msg = Object.assign({ type: 'sourceSelectionResult' }, result);
+    if (vscode) {
+        vscode.postMessage(msg);
+    } else if (window.parent !== window) {
+        window.parent.postMessage(msg, '*');
+    }
+}
+
+function combinedFeatureExtent(features) {
+    if (!features || features.length === 0) return null;
+    var extent = features[0].getGeometry().getExtent().slice(0);
+    for (var i = 1; i < features.length; i++) {
+        ol.extent.extend(extent, features[i].getGeometry().getExtent());
+    }
+    return extent;
+}
+
+function _selectFeaturesBySource(targetFile, targetLine, options) {
+    options = options || {};
     targetFile = (targetFile || '').replace(/\\/g, '/');
     targetLine = parseInt(targetLine, 10);
-    if (!targetFile || isNaN(targetLine)) return;
+    var requestId = options.requestId || null;
+    var origin = options.origin || 'viewer';
+    if (!targetFile || isNaN(targetLine)) {
+        var invalidResult = { requestId: requestId, origin: origin, file: targetFile, line: targetLine, matchCount: 0, status: 'no-match', viewportAction: 'preserve' };
+        postSourceSelectionResult(invalidResult);
+        return invalidResult;
+    }
 
     var matches = allFeatures.filter(function(f) {
         var prov = f.get('provenance') || {};
@@ -454,14 +651,24 @@ function _selectFeaturesBySource(targetFile, targetLine) {
         }
     });
 
-    if (all.length > 0) {
-        replaceSelection(all);
-        var extent = all[0].getGeometry().getExtent().slice(0);
-        for (var i = 1; i < all.length; i++) {
-            ol.extent.extend(extent, all[i].getGeometry().getExtent());
-        }
+    if (all.length === 0) {
+        var noMatch = { requestId: requestId, origin: origin, file: targetFile, line: targetLine, matchCount: 0, status: 'no-match', viewportAction: 'preserve' };
+        setEditorStatus('warn', 'No polygons found for ' + targetFile + ':' + targetLine);
+        postSourceSelectionResult(noMatch);
+        return noMatch;
+    }
+
+    applyFeatureSelection(all, 'replace', { origin: origin, requestId: requestId });
+    var extent = combinedFeatureExtent(all);
+    var viewport = map.getView().calculateExtent(map.getSize());
+    var viewportAction = ViewerEditorLogic.viewportActionForSelection(viewport, extent);
+    if (viewportAction === 'fit' && extent) {
         map.getView().fit(extent, { padding: [60, 60, 60, 60], duration: 300 });
     }
+    var result = { requestId: requestId, origin: origin, file: targetFile, line: targetLine, matchCount: all.length, status: 'matched', viewportAction: viewportAction };
+    setEditorStatus('info', all.length + ' polygons selected from ' + targetFile + ':' + targetLine);
+    postSourceSelectionResult(result);
+    return result;
 }
 
 // Rewrite labels on selected features. For grouped selection, show one
@@ -497,18 +704,17 @@ function rewriteLabels(label) {
 // Mode switching
 // ============================================================
 function setMode(mode) {
-    if (mode === currentMode && mode !== 'select') {
-        mode = 'select';
-    }
     currentMode = mode;
+    editorState.activeTool = mode;
+    editorState.gestureState = 'idle';
 
     Object.keys(drawInteractions).forEach(function(key) {
         drawInteractions[key].setActive(false);
     });
 
     var isDrawMode = (mode !== 'select');
-    selectClick.setActive(!isDrawMode);
-    dragBox.setActive(!isDrawMode);
+    if (typeof selectClick !== 'undefined' && selectClick) selectClick.setActive(false);
+    if (typeof dragBox !== 'undefined' && dragBox) dragBox.setActive(!isDrawMode);
 
     if (isDrawMode && drawInteractions[mode]) {
         drawInteractions[mode].setActive(true);
@@ -518,6 +724,7 @@ function setMode(mode) {
         if (btn.dataset.mode === 'snap' || btn.dataset.mode === 'delete') return;
         btn.classList.toggle('active', btn.dataset.mode === mode);
     });
+    updateEditorStatusFromState();
 }
 
 function deleteDrawn() {
@@ -538,23 +745,25 @@ function deleteDrawn() {
 // ============================================================
 // Selection changed handler
 // ============================================================
-function onSelectionChanged() {
+function onSelectionChanged(options) {
+    options = options || {};
     var features = selectedFeatures.getArray();
     var count = features.length;
+    editorState.selectedCount = count;
 
     var hasDrawn = count > 0 && features.some(function(f) { return f.get('isDrawn'); });
     modifyInteraction.setActive(hasDrawn);
     translateInteraction.setActive(hasDrawn);
 
     if (count === 0) {
-        postSelectedComponents([]);
+        postSelectedComponents([], options);
         clearInspect();
         return;
     }
 
     var drawnFeatures = features.filter(function(f) { return f.get('isDrawn'); });
     var gdsFeatures = features.filter(function(f) { return !f.get('isDrawn'); });
-    postSelectedComponents(features);
+    postSelectedComponents(features, options);
 
     if (drawnFeatures.length > 0 && gdsFeatures.length === 0) {
         if (drawnFeatures.length === 1) {
@@ -573,10 +782,13 @@ function onSelectionChanged() {
     }
 }
 
-function postSelectedComponents(features) {
+function postSelectedComponents(features, options) {
+    options = options || {};
     var msg = {
         type: 'selectComponents',
-        components: componentsFromFeatures(features)
+        components: componentsFromFeatures(features),
+        origin: options.origin || 'viewer',
+        requestId: options.requestId || null
     };
     if (vscode) {
         vscode.postMessage(msg);
@@ -966,12 +1178,17 @@ var vectorLayer = new ol.layer.Vector({
     }
 });
 
+overlayImageLayer = new ol.layer.Image({
+    opacity: 0.5,
+    visible: false
+});
+
 // ============================================================
 // Map setup
 // ============================================================
 var map = new ol.Map({
     target: 'map',
-    layers: [vectorLayer, drawLayer],
+    layers: [overlayImageLayer, vectorLayer, drawLayer],
     view: new ol.View({ center: [0, 0], zoom: 2, minZoom: -20, maxZoom: 40 }),
     controls: []
 });
@@ -983,45 +1200,306 @@ var selectClick = new ol.interaction.Select({
     multi: true
 });
 map.addInteraction(selectClick);
+selectClick.setActive(false);
 
-selectClick.on('select', function(e) {
-    var clicked = e.selected.length > 0 ? e.selected[0] : null;
-
-    if (clicked) {
-        var alreadySelected = selectedFeatures.getArray().includes(clicked);
-        if (ctrlPressed) {
-            if (alreadySelected) {
-                removeFromSelection([clicked]);
-            } else {
-                addToSelection([clicked]);
+// ============================================================
+// Microscopy overlay workbench
+// ============================================================
+function overlayJsonFetch(url, options) {
+    return fetch(url, options).then(function(response) {
+        return response.json().then(function(data) {
+            if (!response.ok) {
+                var err = data && data.error ? data.error : { problem: 'Overlay request failed', cause: response.statusText, fix: 'Retry the action.' };
+                throw new Error(err.problem + ': ' + err.cause + ' | ' + err.fix);
             }
-        } else {
-            replaceSelection([clicked]);
-        }
-    } else {
-        clearSelection();
+            return data;
+        });
+    });
+}
+
+function overlayImageUrl(overlay, kind) {
+    if (!overlay || !overlay.id) return '';
+    return '/api/image-overlays/' + encodeURIComponent(overlay.id) + '/image' + (kind ? '?kind=' + encodeURIComponent(kind) : '');
+}
+
+function updateOverlayLayer() {
+    var model = OverGDSOverlayLogic.registeredImageModel(activeOverlay);
+    if (!model.ready) {
+        overlayImageLayer.setVisible(false);
+        overlayImageLayer.setSource(null);
         return;
     }
+    overlayImageLayer.setOpacity(model.opacity);
+    overlayImageLayer.setVisible(model.visible);
+    overlayImageLayer.setSource(new ol.source.ImageStatic({
+        url: model.url,
+        imageExtent: model.extent,
+        projection: 'EPSG:3857'
+    }));
+}
 
-    selectClick.getFeatures().clear();
-    if (!ctrlPressed) {
-        // Normal single selection: reset cycle and restore labels
-        rewriteLabels('');
-        selectionCycle = 0;
-        var cycleEl = document.getElementById('cycle-indicator');
-        if (cycleEl) { cycleEl.textContent = ''; cycleEl.style.display = 'none'; }
+function formatPoint(point) {
+    if (!point) return '';
+    return point.map(function(v) { return Number(v).toFixed(1); }).join(', ');
+}
+
+function renderOverlayPairs() {
+    var body = document.getElementById('overlay-pair-body');
+    if (!body) return;
+    body.innerHTML = '';
+    overlayCorrespondences.forEach(function(pair, idx) {
+        var row = document.createElement('tr');
+        row.innerHTML = '<td>' + (idx + 1) + '</td><td>' + formatPoint(pair.imagePx) + '</td><td>' + formatPoint(pair.gdsUm) + '</td>';
+        body.appendChild(row);
+    });
+    var fitType = (document.getElementById('overlay-fit-type') || {}).value || 'affine';
+    var readiness = OverGDSOverlayLogic.fitReadiness(overlayCorrespondences, fitType);
+    var fitButton = document.getElementById('overlay-fit');
+    if (fitButton) fitButton.disabled = !activeOverlay || !readiness.ready;
+}
+
+function renderOverlayRail() {
+    var fileName = document.getElementById('overlay-file-name');
+    var status = document.getElementById('overlay-status');
+    var preview = document.getElementById('overlay-preview');
+    var previewEmpty = document.getElementById('overlay-preview-empty');
+    var pending = document.getElementById('overlay-pending');
+    var opacity = document.getElementById('overlay-opacity');
+    var opacityValue = document.getElementById('overlay-opacity-value');
+    var visibleButton = document.getElementById('overlay-visible');
+    var registered = OverGDSOverlayLogic.registeredImageModel(activeOverlay);
+    var summary = activeOverlay ? OverGDSOverlayLogic.confidenceSummary(activeOverlay.transform) : OverGDSOverlayLogic.confidenceSummary(null);
+
+    if (fileName) fileName.textContent = activeOverlay ? activeOverlay.fileName : 'No image';
+    if (status) {
+        status.textContent = activeOverlay ? OverGDSOverlayLogic.statusText(activeOverlay) : 'No image';
+        status.className = summary.tone || '';
     }
-    vectorLayer.changed();
-    drawLayer.changed();
-    onSelectionChanged();
+    if (preview && previewEmpty) {
+        if (activeOverlay) {
+            preview.src = overlayImageUrl(activeOverlay, 'original');
+            preview.style.display = 'block';
+            previewEmpty.style.display = 'none';
+        } else {
+            preview.removeAttribute('src');
+            preview.style.display = 'none';
+            previewEmpty.style.display = 'block';
+        }
+    }
+    if (pending) {
+        pending.textContent = pendingOverlayImagePoint ? 'Pick GDS point' : '';
+    }
+    if (opacity) {
+        opacity.value = String(activeOverlay && typeof activeOverlay.opacity === 'number' ? activeOverlay.opacity : 0.5);
+        opacity.disabled = !registered.ready;
+    }
+    if (opacityValue) opacityValue.textContent = registered.ready ? registered.opacityPercent + '%' : '50%';
+    if (visibleButton) {
+        visibleButton.disabled = !registered.ready;
+        visibleButton.textContent = activeOverlay && registered.ready && activeOverlay.visible !== false ? 'Hide' : 'Show';
+    }
+    renderOverlayPairs();
+    updateOverlayLayer();
+}
+
+function setActiveOverlay(overlay) {
+    activeOverlay = overlay || null;
+    pendingOverlayImagePoint = null;
+    overlayCorrespondences = activeOverlay && activeOverlay.transform ? (activeOverlay.transform.correspondences || []).slice() : overlayCorrespondences;
+    if (!activeOverlay) overlayCorrespondences = [];
+    renderOverlayRail();
+}
+
+function importOverlayFile(file) {
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function() {
+        var result = String(reader.result || '');
+        var comma = result.indexOf(',');
+        var contentBase64 = comma >= 0 ? result.slice(comma + 1) : result;
+        overlayJsonFetch('/api/image-overlays', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ fileName: file.name, mimeType: file.type || 'application/octet-stream', contentBase64: contentBase64 })
+        }).then(function(data) {
+            overlayCorrespondences = [];
+            setActiveOverlay(data.overlay);
+        }).catch(function(err) {
+            setEditorStatus('error', err.message);
+        });
+    };
+    reader.onerror = function() {
+        setEditorStatus('error', 'Could not read microscopy image');
+    };
+    reader.readAsDataURL(file);
+}
+
+function addOverlayImagePointFromPreview(event) {
+    if (!activeOverlay || !activeOverlay.imageSize) return;
+    var img = event.currentTarget;
+    var rect = img.getBoundingClientRect();
+    var x = (event.clientX - rect.left) / Math.max(1, rect.width) * activeOverlay.imageSize.widthPx;
+    var y = (event.clientY - rect.top) / Math.max(1, rect.height) * activeOverlay.imageSize.heightPx;
+    pendingOverlayImagePoint = [x, y];
+    renderOverlayRail();
+}
+
+function addOverlayGdsPoint(coordinate) {
+    if (!pendingOverlayImagePoint || !activeOverlay) return false;
+    overlayCorrespondences.push({
+        imagePx: pendingOverlayImagePoint,
+        gdsUm: [coordinate[0], coordinate[1]],
+        source: 'manual'
+    });
+    pendingOverlayImagePoint = null;
+    renderOverlayRail();
+    return true;
+}
+
+function fitOverlayTransform() {
+    if (!activeOverlay) return;
+    var fitType = document.getElementById('overlay-fit-type').value || 'affine';
+    overlayJsonFetch('/api/image-overlays/' + encodeURIComponent(activeOverlay.id) + '/register', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ type: fitType, correspondences: overlayCorrespondences })
+    }).then(function(data) {
+        setActiveOverlay(data.overlay);
+    }).catch(function(err) {
+        setEditorStatus('error', err.message);
+    });
+}
+
+function patchActiveOverlay(patch) {
+    if (!activeOverlay) return Promise.resolve(null);
+    return overlayJsonFetch('/api/image-overlays/' + encodeURIComponent(activeOverlay.id), {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(patch)
+    }).then(function(data) {
+        setActiveOverlay(data.overlay);
+        return data.overlay;
+    }).catch(function(err) {
+        setEditorStatus('error', err.message);
+        return null;
+    });
+}
+
+function initOverlayRail() {
+    var input = document.getElementById('overlay-file-input');
+    var preview = document.getElementById('overlay-preview');
+    var fit = document.getElementById('overlay-fit');
+    var fitType = document.getElementById('overlay-fit-type');
+    var opacity = document.getElementById('overlay-opacity');
+    var visibleButton = document.getElementById('overlay-visible');
+    if (input) input.addEventListener('change', function(e) { importOverlayFile(e.target.files && e.target.files[0]); });
+    if (preview) preview.addEventListener('click', addOverlayImagePointFromPreview);
+    if (fit) fit.addEventListener('click', fitOverlayTransform);
+    if (fitType) fitType.addEventListener('change', renderOverlayPairs);
+    if (opacity) opacity.addEventListener('input', function(e) {
+        var value = Number(e.target.value);
+        if (activeOverlay) {
+            activeOverlay.opacity = value;
+            renderOverlayRail();
+            patchActiveOverlay({ opacity: value });
+        }
+    });
+    if (visibleButton) visibleButton.addEventListener('click', function() {
+        if (!activeOverlay) return;
+        patchActiveOverlay({ visible: activeOverlay.visible === false });
+    });
+    overlayJsonFetch('/api/image-overlays', { method: 'GET' }).then(function(data) {
+        if (data.overlays && data.overlays.length) setActiveOverlay(data.overlays[0]);
+        else renderOverlayRail();
+    }).catch(function() {
+        renderOverlayRail();
+    });
+}
+
+window.__overgdsSetActiveOverlay = setActiveOverlay;
+window.__overgdsOverlayImageLayerState = function() {
+    var model = OverGDSOverlayLogic.registeredImageModel(activeOverlay);
+    return {
+        extent: model.extent,
+        opacity: model.opacity,
+        visible: model.visible
+    };
+};
+
+var nextViewerCycleUid = 1;
+
+function featureCycleId(feature) {
+    if (feature.__viewerCycleUid !== undefined && feature.__viewerCycleUid !== null) {
+        return feature.__viewerCycleUid;
+    }
+    if (feature.ol_uid !== undefined && feature.ol_uid !== null) {
+        feature.__viewerCycleUid = 'ol:' + feature.ol_uid;
+        return feature.__viewerCycleUid;
+    }
+    if (typeof ol !== 'undefined' && typeof ol.getUid === 'function') {
+        feature.__viewerCycleUid = 'ol:' + ol.getUid(feature);
+        return feature.__viewerCycleUid;
+    }
+    if (typeof feature.getId === 'function') {
+        var id = feature.getId();
+        if (id !== undefined && id !== null) {
+            feature.__viewerCycleUid = 'id:' + id;
+            return feature.__viewerCycleUid;
+        }
+    }
+    feature.__viewerCycleUid = 'local:' + nextViewerCycleUid++;
+    return feature.__viewerCycleUid;
+}
+
+function collectFeaturesAtPixel(pixel) {
+    var candidates = [];
+    var seen = {};
+    map.forEachFeatureAtPixel(pixel, function(feature, layer) {
+        if (layer !== vectorLayer && layer !== drawLayer) return;
+        if (feature.get('visible') === false) return;
+        var id = featureCycleId(feature);
+        if (seen[id]) return;
+        seen[id] = true;
+        candidates.push(feature);
+    }, {
+        hitTolerance: 4,
+        layerFilter: function(layer) {
+            return layer === vectorLayer || layer === drawLayer;
+        }
+    });
+    return candidates;
+}
+
+function selectFeatureAtPixel(pixel, originalEvent) {
+    var op = ViewerEditorLogic.selectionOpFromEvent(originalEvent);
+    editorState.selectionOp = op;
+    var candidates = collectFeaturesAtPixel(pixel);
+
+    if (candidates.length > 0) {
+        var cycle = ViewerEditorLogic.nextClickCycle(overlapClickState, candidates, pixel);
+        overlapClickState = cycle.state;
+        applyFeatureSelection([cycle.feature], op, { preserveClickCycle: true });
+        if (cycle.isOverlap) {
+            setEditorStatus('info', 'Overlap ' + (cycle.index + 1) + '/' + cycle.count + ': click again to cycle');
+        }
+    } else {
+        resetOverlapClickCycle();
+        if (op === 'replace') clearSelection();
+        return;
+    }
+}
+
+map.on('singleclick', function(e) {
+    if (addOverlayGdsPoint(e.coordinate)) return;
+    if (editorState.activeTool !== 'select') return;
+    selectFeatureAtPixel(e.pixel, e.originalEvent || {});
 });
 
 // DragBox interaction for area selection
 var dragBox = new ol.interaction.DragBox({
     condition: function(mapBrowserEvent) {
         return ol.events.condition.mouseActionButton(mapBrowserEvent) &&
-               ol.events.condition.noModifierKeys(mapBrowserEvent) ||
-               ol.events.condition.platformModifierKeyOnly(mapBrowserEvent);
+               ViewerEditorLogic.shouldStartBoxSelect(editorState, mapBrowserEvent.originalEvent || {});
     }
 });
 map.addInteraction(dragBox);
@@ -1029,6 +1507,9 @@ map.addInteraction(dragBox);
 var dragStartPixel = null;
 
 dragBox.on('boxstart', function(e) {
+    editorState.boxSelectMode = 'active';
+    editorState.selectionOp = ViewerEditorLogic.selectionOpFromEvent(e.mapBrowserEvent.originalEvent || {});
+    updateEditorStatusFromState();
     dragStartPixel = e.mapBrowserEvent.pixel;
 });
 
@@ -1040,7 +1521,11 @@ dragBox.on('boxend', function(e) {
         Math.pow(endPixel[1] - dragStartPixel[1], 2)
     );
 
-    if (dragDist < 5) return;
+    if (dragDist < 5) {
+        editorState.boxSelectMode = 'off';
+        updateEditorStatusFromState();
+        return;
+    }
 
     var featuresInBox = [];
     source.forEachFeatureInExtent(extent, function(f) {
@@ -1058,15 +1543,16 @@ dragBox.on('boxend', function(e) {
         }
     });
 
-    if (ctrlPressed) {
-        addToSelection(featuresInBox);
+    var op = ViewerEditorLogic.selectionOpFromEvent(e.mapBrowserEvent.originalEvent || {});
+    var startTime = performance.now();
+    applyFeatureSelection(featuresInBox, op);
+    var elapsed = performance.now() - startTime;
+    editorState.boxSelectMode = 'off';
+    if (elapsed > 500) {
+        setEditorStatus('warn', 'Box select: ' + featuresInBox.length + ' features selected in ' + Math.round(elapsed) + 'ms');
     } else {
-        replaceSelection(featuresInBox);
+        updateEditorStatusFromState();
     }
-
-    vectorLayer.changed();
-    drawLayer.changed();
-    onSelectionChanged();
 });
 
 // --- Draw interactions ---
@@ -1104,7 +1590,18 @@ map.addInteraction(drawPolygon);
 drawInteractions['polygon'] = drawPolygon;
 
 Object.keys(drawInteractions).forEach(function(key) {
+    drawInteractions[key].on('drawstart', function() {
+        editorState.activeTool = key;
+        editorState.gestureState = 'drawing';
+        updateEditorStatusFromState();
+    });
+    drawInteractions[key].on('drawabort', function() {
+        editorState.gestureState = 'idle';
+        updateEditorStatusFromState();
+    });
     drawInteractions[key].on('drawend', function(e) {
+        editorState.activeTool = key;
+        editorState.gestureState = 'idle';
         var feature = e.feature;
         feature.set('isDrawn', true);
         feature.set('shapeType', key);
@@ -1119,7 +1616,7 @@ Object.keys(drawInteractions).forEach(function(key) {
         } catch (err) {
             console.error('superGDS: annotation serialization failed', err);
         }
-        setTimeout(function() { setMode('select'); }, 50);
+        updateEditorStatusFromState();
     });
 });
 
@@ -2032,10 +2529,15 @@ window.addEventListener('message', function(event) {
             onSelectionChanged();
             break;
         case 'selectBySource':
-            _selectFeaturesBySource((message.file || '').replace(/\\/g, '/'), message.line);
+            _selectFeaturesBySource((message.file || '').replace(/\\/g, '/'), message.line, {
+                requestId: message.requestId || null,
+                origin: message.origin || 'external'
+            });
             break;
     }
 });
+
+initOverlayRail();
 
 // ============================================================
 // Keep OpenLayers canvas sized to its container

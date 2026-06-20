@@ -43,6 +43,14 @@ npm run dev
 
 Open http://localhost:3000
 
+If port 3000 is already in use, set `PORT`:
+
+```bash
+PORT=4173 npm run dev
+```
+
+Open http://localhost:4173
+
 ## Running the Test Script
 
 ```bash
@@ -56,6 +64,16 @@ This generates `tests/py/gds/suspended_superconductor_standalone.gds` and its pr
 ## Python Environment Selection
 
 The toolbar includes a Python environment selector dropdown. Select the `gds` conda environment to enable provenance tracking when running scripts. The `/api/parse` and `/api/run` endpoints accept a `pythonPath` parameter to specify which Python interpreter to use.
+
+## Microscopy Overlay Registration
+
+The viewer supports a P1 microscopy overlay workflow: insert an image, choose image/GDS correspondence pairs, fit similarity or affine registration, server-warp the raster, and inspect a transparent overlay before drawing. Install the image-processing dependencies first:
+
+```bash
+pip install -r requirements.txt
+```
+
+See `docs/microscopy-overlay.md` for the quickstart, troubleshooting map, and dogfood checklist.
 
 ## Project Structure
 

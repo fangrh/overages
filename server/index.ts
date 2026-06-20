@@ -10,8 +10,10 @@ import { registerAnnotationRoutes } from './annotationRoutes.js';
 import { registerEnvRoutes } from './envRoutes.js';
 import { registerTerminalRoutes } from './terminalRoutes.js';
 import { registerStateRoutes } from './stateRoutes.js';
+import { registerOverlayRoutes } from './overlayRoutes.js';
+import { getServerPort } from './config.js';
 
-const PORT = 3000;
+const PORT = getServerPort();
 
 const app = Fastify({ logger: true });
 
@@ -29,6 +31,7 @@ await registerParseRoutes(app);
 await registerAnnotationRoutes(app);
 await registerEnvRoutes(app);
 await registerStateRoutes(app);
+await registerOverlayRoutes(app);
 
 await app.register(fastifyStatic, {
   root: path.join(process.cwd(), 'frontend'),
