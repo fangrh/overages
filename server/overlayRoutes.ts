@@ -13,6 +13,8 @@ import { warpOverlayToRegisteredAsset } from '../lib/warpOverlay.js';
 import { getWorkspacePath } from './workspace.js';
 import fs from 'fs/promises';
 
+const MAX_OVERLAY_UPLOAD_BYTES = 25 * 1024 * 1024;
+
 function actionableError(reply: FastifyReply, statusCode: number, problem: string, cause: string, fix: string) {
   reply.code(statusCode);
   return { error: { problem, cause, fix } };
@@ -41,7 +43,7 @@ export async function registerOverlayRoutes(app: FastifyInstance) {
     return { overlays: await listImageOverlays(workspace) };
   });
 
-  app.post('/api/image-overlays', async (req, reply) => {
+  app.post('/api/image-overlays', { bodyLimit: MAX_OVERLAY_UPLOAD_BYTES }, async (req, reply) => {
     try {
       const workspace = getWorkspacePath();
       const image = decodeBase64Image(req.body);

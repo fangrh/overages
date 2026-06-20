@@ -66,6 +66,27 @@ test('POST /api/image-overlays imports image metadata into workspace storage', a
   assert.deepEqual(listResponse.json().overlays.map((item: any) => item.id), [overlay.id]);
 });
 
+test('POST /api/image-overlays accepts microscope-scale image payloads', async () => {
+  const { app, workspace } = await testApp();
+  const microscopePayload = Buffer.alloc(1_500_000, 0xab);
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/image-overlays',
+    payload: {
+      fileName: 'large-flake.jpg',
+      mimeType: 'image/jpeg',
+      contentBase64: microscopePayload.toString('base64'),
+    },
+  });
+
+  assert.equal(response.statusCode, 200, response.body);
+  const overlay = response.json().overlay;
+  assert.equal(overlay.fileName, 'large-flake.jpg');
+  assert.equal(overlay.imageSize, null);
+  assert.equal(fs.existsSync(path.join(workspace, overlay.assetPath)), true);
+});
+
 test('PATCH /api/image-overlays/:id updates opacity and rejects invalid patches with actionable error', async () => {
   const { app } = await testApp();
   const overlay = await createOverlay(app);
