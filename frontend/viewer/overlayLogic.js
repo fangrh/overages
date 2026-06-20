@@ -60,6 +60,36 @@
     };
   }
 
+  function overlayTimestamp(overlay) {
+    var timestamp = overlay && (overlay.updatedAt || overlay.createdAt);
+    var value = timestamp ? Date.parse(timestamp) : 0;
+    return isFinite(value) ? value : 0;
+  }
+
+  function overlaySelectionScore(overlay) {
+    var registered = !!(overlay && overlay.registeredAssetPath && overlay.registeredBoundsUm);
+    var stale = !!(overlay && overlay.stale && overlay.stale.status === 'stale');
+    return [
+      registered && !stale ? 1 : 0,
+      registered ? 1 : 0,
+      overlay && overlay.transform ? 1 : 0,
+      overlayTimestamp(overlay)
+    ];
+  }
+
+  function preferredOverlay(overlays) {
+    var candidates = Array.isArray(overlays) ? overlays.filter(Boolean) : [];
+    if (!candidates.length) return null;
+    return candidates.slice().sort(function(a, b) {
+      var aScore = overlaySelectionScore(a);
+      var bScore = overlaySelectionScore(b);
+      for (var i = 0; i < aScore.length; i += 1) {
+        if (aScore[i] !== bScore[i]) return bScore[i] - aScore[i];
+      }
+      return String(b.id || '').localeCompare(String(a.id || ''));
+    })[0];
+  }
+
   function statusText(overlay) {
     if (!overlay) return 'No image';
     if (overlay.stale && overlay.stale.status === 'stale') {
@@ -73,6 +103,7 @@
     fitReadiness: fitReadiness,
     confidenceSummary: confidenceSummary,
     registeredImageModel: registeredImageModel,
+    preferredOverlay: preferredOverlay,
     statusText: statusText
   };
 })(typeof window !== 'undefined' ? window : globalThis);

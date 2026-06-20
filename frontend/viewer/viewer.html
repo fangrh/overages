@@ -1409,7 +1409,8 @@ function initOverlayRail() {
         patchActiveOverlay({ visible: activeOverlay.visible === false });
     });
     overlayJsonFetch('/api/image-overlays', { method: 'GET' }).then(function(data) {
-        if (data.overlays && data.overlays.length) setActiveOverlay(data.overlays[0]);
+        var restoredOverlay = OverGDSOverlayLogic.preferredOverlay(data.overlays);
+        if (restoredOverlay) setActiveOverlay(restoredOverlay);
         else renderOverlayRail();
     }).catch(function() {
         renderOverlayRail();
