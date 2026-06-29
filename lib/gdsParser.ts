@@ -1,16 +1,16 @@
 import { spawn } from 'child_process';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// superGDS root is two levels up from lib/ (overgds/lib → overgds → superGDS)
-const SUPERGDS_ROOT = path.resolve(__dirname, '../..');
+// Project root — npm scripts (dev/start) run from the overgds directory,
+// consistent with server/index.ts. This keeps the app self-contained when
+// cloned standalone (python/parse_gds.py ships inside this repo).
+const PROJECT_ROOT = process.cwd();
 
 export async function parseGdsFile(gdsPath: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    const parseScript = path.join(SUPERGDS_ROOT, 'python/parse_gds.py');
+    const parseScript = path.join(PROJECT_ROOT, 'python/parse_gds.py');
     const proc = spawn('python', [parseScript, gdsPath], {
-      cwd: SUPERGDS_ROOT,
+      cwd: PROJECT_ROOT,
     });
 
     let stdout = '';
