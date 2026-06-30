@@ -12,3 +12,7 @@ frontend/**/*.js.map
 
 # Local runtime state
 .supergds-state.json
+
+# Test / tool output
+test-results/
+tests/py/gds/
