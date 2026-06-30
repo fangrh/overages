@@ -4,3 +4,11 @@ node_modules/
 .gstack/
 .omx/
 __pycache__/
+
+# Build output
+dist/
+frontend/**/*.js
+frontend/**/*.js.map
+
+# Local runtime state
+.supergds-state.json
