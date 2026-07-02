@@ -25,6 +25,7 @@ export interface TermPanelDeps {
 
 interface TermInstance {
   id: number;
+  sessionId: string;   // tmux session id; primary terminal reuses a persisted value
   label: string;
   xterm: any;
   fit: any;
@@ -110,13 +111,39 @@ export class TermPanel {
     this.newTerminal();
   }
 
-  private wsUrl(): string {
-    if (this.deps.wsUrl) return this.deps.wsUrl;
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${proto}//${location.host}/api/terminal`;
+  private static PRIMARY_KEY = 'overgds.terminal-session';
+
+  // The primary terminal's session id is persisted so a browser refresh
+  // reconnects to the surviving tmux session (where claude/etc. still run).
+  private primarySessionId(): string {
+    try {
+      const existing = localStorage.getItem(TermPanel.PRIMARY_KEY);
+      const id = existing || ((crypto as any).randomUUID?.() || `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`);
+      if (!existing) localStorage.setItem(TermPanel.PRIMARY_KEY, id);
+      return id;
+    } catch {
+      return 'default';
+    }
   }
 
-  newTerminal(): void {
+  private freshSessionId(): string {
+    return (crypto as any).randomUUID?.() || `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  private wsUrl(sessionId: string): string {
+    const base = this.deps.wsUrl && !this.deps.wsUrl.includes('?')
+      ? this.deps.wsUrl
+      : (() => {
+          const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+          return `${proto}//${location.host}/api/terminal`;
+        })();
+    return `${base}?session=${encodeURIComponent(sessionId)}`;
+  }
+
+  newTerminal(sessionId?: string): void {
+    // First terminal (constructor) reuses the persisted primary id so refresh
+    // reattaches; later terminals (+ button) get a fresh ephemeral id.
+    const sid = sessionId ?? (this.terms.length === 0 ? this.primarySessionId() : this.freshSessionId());
     const id = this.nextId++;
     const el = document.createElement('div');
     el.className = 'term-instance hidden';
@@ -131,7 +158,7 @@ export class TermPanel {
     xterm.loadAddon(fit);
     try { xterm.open(el); } catch (e) { console.error('xterm open failed', e); }
 
-    const inst: TermInstance = { id, label: `term ${id}`, xterm, fit, ws: null, el, dead: false };
+    const inst: TermInstance = { id, sessionId: sid, label: `term ${id}`, xterm, fit, ws: null, el, dead: false };
     this.terms.push(inst);
     this.view.appendChild(el);
 
@@ -148,7 +175,7 @@ export class TermPanel {
 
   private connect(inst: TermInstance): void {
     try {
-      inst.ws = new WebSocket(this.wsUrl());
+      inst.ws = new WebSocket(this.wsUrl(inst.sessionId));
     } catch (e) {
       inst.xterm.write(`\r\n\x1b[31mCannot open terminal: ${(e as Error).message}\x1b[0m\r\n`);
       return;
