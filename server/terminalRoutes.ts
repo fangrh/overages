@@ -2,10 +2,18 @@ import { FastifyInstance, FastifyRequest } from 'fastify';
 import { getWorkspacePath } from './workspace.js';
 import ptyLib from 'node-pty';
 import {
-  isTmuxAvailable, sessionName, hasSession, createSession, capturePane,
+  isTmuxAvailable, sessionName, hasSession, createSession, capturePane, killSession,
 } from '../lib/tmux.js';
 
 const TMUX_AVAILABLE = isTmuxAvailable();
+
+// Defense-in-depth: the ?session= value becomes a tmux target (overgds-<id>).
+// Reject anything outside the safe charset and fall back to 'default'. Applied
+// to BOTH the WS upgrade and the DELETE route so neither can be coerced into an
+// arbitrary tmux target.
+function sanitizeSessionId(raw: string | null): string {
+  return raw && /^[A-Za-z0-9_-]+$/.test(raw) ? raw : 'default';
+}
 
 export async function registerTerminalRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/terminal', { websocket: true }, (socket, req: FastifyRequest) => {
@@ -14,10 +22,10 @@ export async function registerTerminalRoutes(app: FastifyInstance): Promise<void
     try {
       const cwd = getWorkspacePath();
 
-      // Parse ?session=<id> from the upgrade URL (default keeps old behavior).
+      // Parse + sanitize ?session=<id> from the upgrade URL.
       const reqUrl = req.url ?? req.raw?.url ?? '/';
-      const session =
-        new URL(reqUrl, 'http://localhost').searchParams.get('session') || 'default';
+      const rawSession = new URL(reqUrl, 'http://localhost').searchParams.get('session');
+      const session = sanitizeSessionId(rawSession);
 
       const cols = 80;
       const rows = 24;
@@ -26,7 +34,17 @@ export async function registerTerminalRoutes(app: FastifyInstance): Promise<void
         const name = sessionName(session);
         const existed = hasSession(name);
         if (!existed) {
-          createSession(name, cwd, cols, rows);
+          // Race-safe create: two concurrent connects for a brand-new session
+          // both see existed===false. If a rival won the race between our
+          // hasSession and createSession, createSession throws on the duplicate
+          // name — recover by treating it as a reattach (replay scrollback).
+          try {
+            createSession(name, cwd, cols, rows);
+          } catch (e) {
+            if (!hasSession(name)) throw e;   // not a race — real failure
+            const scrollback = capturePane(name);
+            if (scrollback) socket.send(scrollback);
+          }
         } else {
           // Reattach after a browser refresh: replay scrollback BEFORE the
           // tmux client redraws, so the user sees prior output again.
@@ -92,5 +110,17 @@ export async function registerTerminalRoutes(app: FastifyInstance): Promise<void
       socket.send(`\r\nTerminal error: ${(err as Error).message}\r\n`);
       socket.close();
     }
+  });
+
+  // Explicit teardown for non-primary terminals (the "+"-button ones). The
+  // primary terminal's session is intentionally left alive across refreshes;
+  // ephemeral sessions would otherwise leak forever (until server reboot) since
+  // a WS close only kills the client PTY. killSession is a no-op if the session
+  // is already gone, so this is safe to call anytime.
+  app.delete('/api/terminal', async (req, reply) => {
+    const raw = new URL(req.url, 'http://localhost').searchParams.get('session');
+    const session = sanitizeSessionId(raw);
+    if (TMUX_AVAILABLE) killSession(sessionName(session));
+    return reply.send({ ok: true });
   });
 }

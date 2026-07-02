@@ -211,6 +211,17 @@ export class TermPanel {
     const idx = this.terms.findIndex(t => t.id === id);
     if (idx < 0) return;
     const inst = this.terms[idx];
+    // Non-primary ("+"-button) terminals own an ephemeral tmux session that the
+    // server keeps alive after WS close (that's the refresh-resilience feature).
+    // Without explicit cleanup it would leak until server reboot, so fire a
+    // best-effort DELETE before disposing. The primary terminal is intentionally
+    // left alive — it's the resilient one a refresh reattaches to.
+    if (inst.sessionId !== this.primarySessionId()) {
+      try {
+        fetch(`/api/terminal?session=${encodeURIComponent(inst.sessionId)}`, { method: 'DELETE' })
+          .catch(() => { /* best-effort: session may already be gone */ });
+      } catch { /* fetch unavailable or blocked — ignore */ }
+    }
     try { inst.ws?.close(); } catch {}
     try { inst.xterm.dispose(); } catch {}
     inst.el.remove();
