@@ -1,48 +1,63 @@
-import { test } from 'node:test';
+import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   isTmuxAvailable, sessionName, hasSession, createSession, capturePane,
-  killSession, listSessions, sweepStaleSessions,
+  killSession, listSessions, sweepStaleSessions, resizeWindow,
 } from '../../lib/tmux.js';
 
-// Test the basic functionality without actually running tmux
-test('isTmuxAvailable returns boolean', () => {
-  const result = isTmuxAvailable();
-  assert.equal(typeof result, 'boolean');
+// Unique prefix per test run so we never collide with real overgds- sessions.
+const PREFIX = `overgds-test-${process.pid}-`;
+const NAME = `${PREFIX}one`;
+const CWD = process.cwd();
+
+before(() => {
+  sweepStaleSessions(PREFIX); // clean slate
 });
 
-test('sessionName formats correctly', () => {
-  const result = sessionName('test123');
-  assert.equal(result, 'overgds-test123');
+after(() => {
+  sweepStaleSessions(PREFIX); // don't leak test sessions
 });
 
-test('hasSession returns boolean', () => {
-  const result = hasSession('test-session');
-  assert.equal(typeof result, 'boolean');
+test('isTmuxAvailable is true in this environment', () => {
+  assert.equal(isTmuxAvailable(), true);
 });
 
-test('createSession returns void', () => {
-  // This will throw if tmux is not available, which is expected
-  try {
-    createSession('test-session', '/tmp', 80, 24);
-    assert.ok(true, 'createSession did not throw');
-  } catch (error) {
-    // If tmux is not available, this is expected
-    assert.ok(error instanceof Error, 'createSession should throw an error');
-  }
+test('sessionName namespaces the id', () => {
+  assert.equal(sessionName('abc'), 'overgds-abc');
 });
 
-test('capturePane returns string or empty', () => {
-  const result = capturePane('test-session');
-  assert.equal(typeof result, 'string');
+test('createSession + hasSession lifecycle', () => {
+  assert.equal(hasSession(NAME), false);
+  createSession(NAME, CWD, 80, 24);
+  assert.equal(hasSession(NAME), true);
+  killSession(NAME);
+  assert.equal(hasSession(NAME), false);
 });
 
-test('listSessions returns array', () => {
-  const result = listSessions();
-  assert.equal(Array.isArray(result), true);
+test('capturePane returns a string for a live session', () => {
+  createSession(NAME, CWD, 80, 24);
+  const text = capturePane(NAME);
+  assert.equal(typeof text, 'string');
+  killSession(NAME);
 });
 
-test('sweepStaleSessions returns number', () => {
-  const result = sweepStaleSessions('test-');
-  assert.equal(typeof result, 'number');
+test('listSessions includes our session', () => {
+  createSession(NAME, CWD, 80, 24);
+  const names = listSessions();
+  assert.ok(names.includes(NAME), `expected ${NAME} in ${JSON.stringify(names)}`);
+  killSession(NAME);
+});
+
+test('sweepStaleSessions kills only matching prefix and returns count', () => {
+  createSession(NAME, CWD, 80, 24);
+  const killed = sweepStaleSessions(PREFIX);
+  assert.ok(killed >= 1, `expected at least 1 killed, got ${killed}`);
+  assert.equal(hasSession(NAME), false);
+});
+
+test('resizeWindow does not throw on a live session', () => {
+  const name = `${PREFIX}resize`;
+  createSession(name, CWD, 80, 24);
+  assert.doesNotThrow(() => resizeWindow(name, 100, 40));
+  killSession(name);
 });
